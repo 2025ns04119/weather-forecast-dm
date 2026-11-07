@@ -1,0 +1,47 @@
+services:
+  # 1. Database: PostgreSQL + TimescaleDB (raw, clean, feature layers)
+  postgres:
+    image: timescale/timescaledb:latest-pg16
+    container_name: weather_db
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./infra/init.sql:/docker-entrypoint-initdb.d/init.sql
+    restart: unless-stopped
+
+  # 2. MLflow: experiment tracking + model registry
+  mlflow:
+    image: ghcr.io/mlflow/mlflow:latest
+    container_name: weather_mlflow
+    command: >
+      mlflow server --host 0.0.0.0 --port 5000
+      --backend-store-uri sqlite:////mlflow/mlflow.db
+      --serve-artifacts --artifacts-destination /mlflow/artifacts
+    ports:
+      - "5000:5000"
+    volumes:
+      - mlflowdata:/mlflow
+    restart: unless-stopped
+
+  # 3. Prefect: scheduling / orchestration UI
+  prefect:
+    image: prefecthq/prefect:3-latest
+    container_name: weather_prefect
+    command: prefect server start --host 0.0.0.0
+    environment:
+      PREFECT_UI_API_URL: http://localhost:4200/api
+    ports:
+      - "4200:4200"
+    volumes:
+      - prefectdata:/root/.prefect
+    restart: unless-stopped
+
+volumes:
+  pgdata:
+  mlflowdata:
+  prefectdata:

@@ -1,0 +1,16 @@
+requests
+pandas
+numpy
+sqlalchemy
+psycopg2-binary
+prefect>=3
+great_expectations
+dvc
+feast[postgres]
+mlflow
+scikit-learn
+xgboost
+evidently
+streamlit
+plotly
+python-dotenv
