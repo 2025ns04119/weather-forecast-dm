@@ -14,7 +14,6 @@ Usage (from the project root):
 import argparse
 import json
 
-import great_expectations as gx
 import pandas as pd
 from psycopg2.extras import execute_values
 from sqlalchemy import text
@@ -34,9 +33,9 @@ COLUMNS = [
 
 # Valid physical ranges (min, max) - the data quality rules
 RANGES = {
-    "temperature_2m": (-10, 50),        # deg C (Bengaluru-safe bounds)
+    "temperature_2m": (-70, 60),        # deg C (physical limits on Earth - global model)
     "relative_humidity_2m": (0, 100),   # %
-    "dew_point_2m": (-30, 40),          # deg C
+    "dew_point_2m": (-80, 40),          # deg C
     "pressure_msl": (870, 1085),        # hPa
     "cloud_cover": (0, 100),            # %
     "wind_speed_10m": (0, 200),         # km/h
@@ -115,6 +114,7 @@ def drop_future_and_duplicates(df: pd.DataFrame) -> tuple[pd.DataFrame, int, int
 # ---------------------------------------------------------------- GE checks
 def run_great_expectations(df: pd.DataFrame) -> dict:
     """Batch-level data quality report using Great Expectations."""
+    import great_expectations as gx   # imported here so the dashboard can reuse the rules cheaply
     context = gx.get_context(mode="ephemeral")
     source = context.data_sources.add_pandas("weather_source")
     asset = source.add_dataframe_asset("clean_weather")
@@ -143,10 +143,14 @@ def run_great_expectations(df: pd.DataFrame) -> dict:
 
 
 def count_missing_hours(df: pd.DataFrame) -> int:
+    """Missing hours inside each location's time range, summed over locations."""
     if df.empty:
         return 0
-    full = pd.date_range(df["ts"].min(), df["ts"].max(), freq="h")
-    return int(len(full) - df["ts"].nunique())
+    total = 0
+    for _, g in df.groupby("location"):
+        full = pd.date_range(g["ts"].min(), g["ts"].max(), freq="h")
+        total += len(full) - g["ts"].nunique()
+    return int(total)
 
 
 # ---------------------------------------------------------------- load

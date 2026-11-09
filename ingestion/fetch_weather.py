@@ -1,109 +1,87 @@
 """
 Ingestion (BRONZE layer): pull weather data from Open-Meteo and store the raw
-JSON payload, unchanged, in raw.weather_api.
+JSON payload, unchanged, in raw.weather_api. Locations are registered in the
+clean.locations dimension table.
 
 Usage (run from the project root):
-    python -m ingestion.fetch_weather --mode live              # last 2 days + today
-    python -m ingestion.fetch_weather --mode backfill --days 730   # history for training
+    python -m ingestion.fetch_weather --mode live                 # monitored city, last 7 days
+    python -m ingestion.fetch_weather --mode backfill --days 730  # monitored city history
+    python -m ingestion.fetch_weather --mode corpus --days 365    # all training cities (global model)
 """
 import argparse
 import json
 import os
 import time
-from datetime import date, timedelta
-import requests
+
 from sqlalchemy import text
+
 from common.db import finish_run, get_engine, start_run
-
-FORECAST_URL = "https://api.open-meteo.com/v1/forecast"
-ARCHIVE_URL = "https://archive-api.open-meteo.com/v1/archive"
-
-HOURLY_VARS = [
-    "temperature_2m",
-    "relative_humidity_2m",
-    "dew_point_2m",
-    "pressure_msl",
-    "cloud_cover",
-    "wind_speed_10m",
-    "wind_direction_10m",
-    "precipitation",
-]
+from config.locations import TRAINING_CITIES
+from ingestion.open_meteo import fetch_history, fetch_recent
 
 LAT = float(os.getenv("LAT", "12.97"))
 LON = float(os.getenv("LON", "77.59"))
 LOCATION = os.getenv("LOCATION", "Bengaluru")
 
 
-def call_api(url: str, params: dict, retries: int = 3) -> dict:
-    """GET with simple retry + backoff."""
-    for attempt in range(1, retries + 1):
-        try:
-            r = requests.get(url, params=params, timeout=60)
-            r.raise_for_status()
-            return r.json()
-        except requests.RequestException as e:
-            print(f"Attempt {attempt} failed: {e}")
-            if attempt == retries:
-                raise
-            time.sleep(5 * attempt)
-
-
-def fetch_live() -> tuple[str, dict]:
-    params = {
-        "latitude": LAT,
-        "longitude": LON,
-        "hourly": ",".join(HOURLY_VARS),
-        "past_days": 7,
-        "forecast_days": 1,
-        "timezone": "UTC",
-    }
-    return "forecast", call_api(FORECAST_URL, params)
-
-
-def fetch_backfill(days: int) -> tuple[str, dict]:
-    end = date.today() - timedelta(days=6)        # archive lags by ~5 days
-    start = end - timedelta(days=days)
-    params = {
-        "latitude": LAT,
-        "longitude": LON,
-        "hourly": ",".join(HOURLY_VARS),
-        "start_date": start.isoformat(),
-        "end_date": end.isoformat(),
-        "timezone": "UTC",
-    }
-    print(f"Backfilling {start} -> {end}")
-    return "archive", call_api(ARCHIVE_URL, params)
-
-
-def save_raw(engine, endpoint: str, payload: dict) -> int:
+def save_raw(engine, location: str, endpoint: str, payload: dict) -> int:
     with engine.begin() as conn:
         return conn.execute(
             text("INSERT INTO raw.weather_api (location, endpoint, payload) "
                  "VALUES (:loc, :ep, CAST(:payload AS JSONB)) RETURNING id"),
-            {"loc": LOCATION, "ep": endpoint, "payload": json.dumps(payload)},
+            {"loc": location, "ep": endpoint, "payload": json.dumps(payload)},
         ).scalar()
+
+
+def upsert_location(engine, location: str, lat: float, lon: float,
+                    elevation=None, role: str = "training"):
+    with engine.begin() as conn:
+        conn.execute(text("""
+            INSERT INTO clean.locations (location, latitude, longitude, elevation, role)
+            VALUES (:loc, :lat, :lon, :elev, :role)
+            ON CONFLICT (location) DO UPDATE SET
+                latitude = EXCLUDED.latitude, longitude = EXCLUDED.longitude,
+                elevation = COALESCE(EXCLUDED.elevation, clean.locations.elevation),
+                role = CASE WHEN clean.locations.role = 'monitored' THEN 'monitored'
+                            ELSE EXCLUDED.role END"""),
+            {"loc": location, "lat": lat, "lon": lon, "elev": elevation, "role": role})
+
+
+def ingest_one(engine, location, lat, lon, mode, days, role) -> tuple[int, int]:
+    if mode == "live":
+        endpoint, payload = "forecast", fetch_recent(lat, lon, past_days=7)
+    else:
+        endpoint, payload = "archive", fetch_history(lat, lon, days)
+    upsert_location(engine, location, lat, lon, payload.get("elevation"), role)
+    n_hours = len(payload.get("hourly", {}).get("time", []))
+    return save_raw(engine, location, endpoint, payload), n_hours
 
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--mode", choices=["live", "backfill"], default="live")
+    parser.add_argument("--mode", choices=["live", "backfill", "corpus"], default="live")
     parser.add_argument("--days", type=int, default=730)
     args = parser.parse_args()
 
     engine = get_engine()
     run_id = start_run(engine, f"ingest_{args.mode}")
     try:
-        if args.mode == "live":
-            endpoint, payload = fetch_live()
+        if args.mode == "corpus":
+            total, ids = 0, []
+            for i, (name, lat, lon) in enumerate(TRAINING_CITIES, start=1):
+                role = "monitored" if name == LOCATION else "training"
+                raw_id, n = ingest_one(engine, name, lat, lon, "backfill", args.days, role)
+                total += n
+                ids.append(raw_id)
+                print(f"[{i:>2}/{len(TRAINING_CITIES)}] {name:<14} raw_id={raw_id}  {n} hours")
+                time.sleep(1)   # be polite to the free API
+            finish_run(engine, run_id, "success", total, len(ids),
+                       f"cities={len(ids)}; raw_ids={ids[0]}-{ids[-1]}")
+            print(f"\nCorpus ingested: {len(ids)} cities, {total:,} hourly records")
         else:
-            endpoint, payload = fetch_backfill(args.days)
-
-        n_hours = len(payload.get("hourly", {}).get("time", []))
-        raw_id = save_raw(engine, endpoint, payload)
-
-        finish_run(engine, run_id, "success", rows_in=n_hours, rows_out=1,
-                   notes=f"raw_id={raw_id}")
-        print(f"Saved raw payload id={raw_id} with {n_hours} hourly records")
+            raw_id, n = ingest_one(engine, LOCATION, LAT, LON, args.mode, args.days, "monitored")
+            finish_run(engine, run_id, "success", rows_in=n, rows_out=1, notes=f"raw_id={raw_id}")
+            print(f"Saved raw payload id={raw_id} with {n} hourly records")
     except Exception as e:
         finish_run(engine, run_id, "failed", notes=str(e)[:500])
         raise

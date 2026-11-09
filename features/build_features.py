@@ -1,40 +1,53 @@
 """
-Feature engineering (SILVER -> GOLD).
+Feature engineering (SILVER -> GOLD), feature version v2 (location-agnostic).
 
-Reads clean.weather_hourly, builds ML features and the label, and upserts
-them into features.weather_features (versioned with feature_version).
+Reads clean.weather_hourly, builds ML features and upserts them into
+features.weather_features. The SAME build_features() function is used by the
+pipeline and by the dashboard's on-demand forecast (no training/serving skew).
 
-Features (all use only past/current values -> no data leakage):
-    hour, month, day_of_week                  time features
-    temp_lag_1h, temp_lag_3h, temp_lag_24h    lag features
-    temp_roll_mean_6h, temp_roll_mean_24h     rolling means
+Features (only past/current values -> no data leakage):
+    hour                      local SOLAR hour (UTC hour + longitude/15) - works anywhere
+    month, latitude           season + hemisphere/climate context
+    temp_lag_1h/3h/24h        lag features
+    temp_roll_mean_6h/24h     rolling means
     humidity, pressure, wind_speed, cloud_cover
-Label:
-    target_temp_24h   temperature 24 hours ahead (null for the latest 24 h ->
-                      these rows are used for prediction, not training)
+Label (training only, added in training/train.py): temperature 24*d hours ahead.
 
 Usage (from the project root):
-    python -m features.build_features            # recompute the last 3 days
-    python -m features.build_features --all      # recompute everything
+    python -m features.build_features                    # monitored city, last 3 days
+    python -m features.build_features --all              # monitored city, full history
+    python -m features.build_features --all-locations    # every stored location, full history
 """
 import argparse
+import os
 
+import numpy as np
 import pandas as pd
 from psycopg2.extras import execute_values
 from sqlalchemy import text
 
 from common.db import finish_run, get_engine, start_run
 
-FEATURE_VERSION = "v1"
+FEATURE_VERSION = "v2"
 MAX_INTERPOLATE_HOURS = 3   # fill gaps up to 3 h; longer gaps stay empty
 
 FEATURE_COLS = [
-    "hour", "month", "day_of_week",
+    "hour", "month", "latitude",
     "temp_lag_1h", "temp_lag_3h", "temp_lag_24h",
     "temp_roll_mean_6h", "temp_roll_mean_24h",
     "humidity", "pressure", "wind_speed", "cloud_cover",
 ]
 TARGET = "target_temp_24h"
+
+
+def load_locations(engine, only: str | None = None) -> pd.DataFrame:
+    sql = "SELECT location, latitude, longitude FROM clean.locations"
+    params = {}
+    if only:
+        sql += " WHERE location = :loc"
+        params["loc"] = only
+    with engine.connect() as conn:
+        return pd.read_sql(text(sql + " ORDER BY location"), conn, params=params)
 
 
 def load_clean(engine, location: str, since=None) -> pd.DataFrame:
@@ -45,15 +58,14 @@ def load_clean(engine, location: str, since=None) -> pd.DataFrame:
     if since is not None:
         sql += " AND ts >= :since"
         params["since"] = since
-    sql += " ORDER BY ts"
     with engine.connect() as conn:
-        df = pd.read_sql(text(sql), conn, params=params)
+        df = pd.read_sql(text(sql + " ORDER BY ts"), conn, params=params)
     df["ts"] = pd.to_datetime(df["ts"], utc=True)
     return df
 
 
-def build_features(clean: pd.DataFrame) -> pd.DataFrame:
-    """Pure function: clean hourly data -> feature table."""
+def build_features(clean: pd.DataFrame, latitude: float, longitude: float) -> pd.DataFrame:
+    """Pure function: clean hourly data for ONE location -> feature table."""
     if clean.empty:
         return pd.DataFrame()
 
@@ -61,16 +73,17 @@ def build_features(clean: pd.DataFrame) -> pd.DataFrame:
     df = clean.set_index("ts").sort_index()
     full = pd.date_range(df.index.min(), df.index.max(), freq="h", tz="UTC")
     df = df.reindex(full)
-    df = df.interpolate(method="time", limit=MAX_INTERPOLATE_HOURS, limit_area="inside")
+    num = df.select_dtypes("number").columns
+    df[num] = df[num].interpolate(method="time", limit=MAX_INTERPOLATE_HOURS, limit_area="inside")
 
     t = df["temperature_2m"]
     out = pd.DataFrame(index=df.index)
 
-    # 2. time features (IST is what matters for daily weather patterns)
-    local = df.index.tz_convert("Asia/Kolkata")
-    out["hour"] = local.hour
-    out["month"] = local.month
-    out["day_of_week"] = local.dayofweek
+    # 2. time + place features (solar hour drives the daily temperature cycle)
+    utc_hour = df.index.hour + df.index.minute / 60
+    out["hour"] = np.floor((utc_hour + longitude / 15.0) % 24).astype(int)
+    out["month"] = df.index.month
+    out["latitude"] = float(latitude)
 
     # 3. lag + rolling features (past only)
     out["temp_lag_1h"] = t.shift(1)
@@ -85,24 +98,22 @@ def build_features(clean: pd.DataFrame) -> pd.DataFrame:
     out["wind_speed"] = df["wind_speed_10m"]
     out["cloud_cover"] = df["cloud_cover"]
 
-    # 5. label: temperature 24 h ahead (exact timestamp match)
+    # 5. day-1 label kept in the table for convenience
     out[TARGET] = t.shift(-24)
 
-    # rows where the current temperature is unknown, or features are incomplete, are dropped
-    out = out[t.notna()]
-    out = out.dropna(subset=FEATURE_COLS)
+    out = out[t.notna()].dropna(subset=FEATURE_COLS)
     out.index.name = "ts"
     return out.reset_index()
 
 
 def save_features(engine, feats: pd.DataFrame, location: str):
+    if feats.empty:
+        return
     cols = FEATURE_COLS + [TARGET]
-    rows = [
-        (location, r.ts.to_pydatetime(),
-         *[None if pd.isna(getattr(r, c)) else float(getattr(r, c)) for c in cols],
-         FEATURE_VERSION)
-        for r in feats.itertuples(index=False)
-    ]
+    rows = [(location, r.ts.to_pydatetime(),
+             *[None if pd.isna(getattr(r, c)) else float(getattr(r, c)) for c in cols],
+             FEATURE_VERSION)
+            for r in feats.itertuples(index=False)]
     sql = f"""
         INSERT INTO features.weather_features (location, ts, {", ".join(cols)}, feature_version)
         VALUES %s
@@ -120,38 +131,39 @@ def save_features(engine, feats: pd.DataFrame, location: str):
 
 
 def main():
-    import os
     parser = argparse.ArgumentParser()
-    parser.add_argument("--all", action="store_true", help="recompute every row")
+    parser.add_argument("--all", action="store_true", help="full history of the monitored city")
+    parser.add_argument("--all-locations", action="store_true", help="full history of every location")
     parser.add_argument("--days", type=int, default=3, help="days to recompute (default 3)")
     args = parser.parse_args()
-    location = os.getenv("LOCATION", "Bengaluru")
+    monitored = os.getenv("LOCATION", "Bengaluru")
 
     engine = get_engine()
     run_id = start_run(engine, "build_features")
     try:
-        if args.all:
-            clean = load_clean(engine, location)
-            keep_from = None
-        else:
-            keep_from = pd.Timestamp.now(tz="UTC") - pd.Timedelta(days=args.days)
-            # extra 2 days of history so 24 h lags / rolling means are complete
-            clean = load_clean(engine, location, since=keep_from - pd.Timedelta(days=2))
+        locs = load_locations(engine, None if args.all_locations else monitored)
+        if locs.empty:
+            raise RuntimeError("No locations found - run infra/migrate_v2.sql and ingestion first")
+        full = args.all or args.all_locations
+        keep_from = None if full else pd.Timestamp.now(tz="UTC") - pd.Timedelta(days=args.days)
 
-        feats = build_features(clean)
-        if keep_from is not None and not feats.empty:
-            feats = feats[feats["ts"] >= keep_from]
+        total_in = total_out = 0
+        for loc in locs.itertuples(index=False):
+            since = None if keep_from is None else keep_from - pd.Timedelta(days=2)
+            clean = load_clean(engine, loc.location, since=since)
+            feats = build_features(clean, loc.latitude, loc.longitude)
+            if keep_from is not None and not feats.empty:
+                feats = feats[feats["ts"] >= keep_from]
+            save_features(engine, feats, loc.location)
+            total_in += len(clean)
+            total_out += len(feats)
+            if len(locs) > 1:
+                print(f"  {loc.location:<14} {len(feats):>7,} feature rows")
 
-        save_features(engine, feats, location)
-
-        n_train = int(feats[TARGET].notna().sum()) if not feats.empty else 0
-        n_pred = len(feats) - n_train
-        finish_run(engine, run_id, "success", len(clean), len(feats),
-                   f"version={FEATURE_VERSION}; with_label={n_train}; latest_without_label={n_pred}")
-        print(f"Clean rows read        : {len(clean)}")
-        print(f"Feature rows saved     : {len(feats)}  (version {FEATURE_VERSION})")
-        print(f"  with label (training): {n_train}")
-        print(f"  latest, no label yet : {n_pred}")
+        finish_run(engine, run_id, "success", total_in, total_out,
+                   f"version={FEATURE_VERSION}; locations={len(locs)}")
+        print(f"Locations: {len(locs)} | clean rows read: {total_in:,} | "
+              f"feature rows saved: {total_out:,} (version {FEATURE_VERSION})")
     except Exception as e:
         finish_run(engine, run_id, "failed", notes=str(e)[:500])
         raise
