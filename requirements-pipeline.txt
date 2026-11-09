@@ -1,0 +1,11 @@
+great_expectations==1.24.1
+mlflow==3.18.0
+numpy==2.4.6
+pandas==2.3.3
+psycopg2-binary==2.9.13
+pyarrow==26.0.1
+python-dotenv==1.2.4
+requests==2.34.2
+scikit-learn==1.9.1
+SQLAlchemy==2.1.8
+xgboost==3.2.0
