@@ -13,12 +13,12 @@ from validation.clean_weather import apply_rules, drop_future_and_duplicates, pa
 
 def forecast_location(model, name: str, lat: float, lon: float) -> dict:
     """
-    Returns {"forecast": DataFrame[target_ts, day_ahead, predicted_temp],
+    Returns {"forecast": DataFrame[target_ts, day_ahead, predicted_temp, humidity, wind, cloud, rain_prob],
              "observed": DataFrame[ts, temperature_2m, ...],
              "current": dict | None, "elevation": float | None,
              "rejected": int}
     """
-    payload = fetch_recent(lat, lon, past_days=7, with_current=True)
+    payload = fetch_recent(lat, lon, past_days=7)   # raw observations only
     raw = {"id": 0, "location": name, "endpoint": "forecast", "payload": payload}
     df = payload_to_df(raw)
     good, rejected = apply_rules(df)

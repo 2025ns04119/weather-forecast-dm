@@ -12,7 +12,7 @@ from mlflow.tracking import MlflowClient
 
 load_dotenv()
 
-MODEL_NAME = "weather-temp-7day"
+MODEL_NAME = "weather-7day"   # multi-target: temp, humidity, wind, cloud, rain
 
 
 def load_champion(model_name: str = MODEL_NAME):

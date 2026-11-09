@@ -1,5 +1,5 @@
 """
-Batch inference: 7-day hourly temperature forecast.
+Batch inference: 7-day hourly forecast of temperature, humidity, wind, cloud cover and rain chance.
 
 1. Load the champion model (weather-temp-7day) from the MLflow registry
 2. Read the latest 24 hourly feature rows from features.weather_features
@@ -35,13 +35,15 @@ def latest_features(engine, location: str) -> pd.DataFrame:
 
 def save_predictions(engine, fc: pd.DataFrame, location: str, version: str, made_at):
     rows = [(location, made_at, r.target_ts.to_pydatetime(), float(r.predicted_temp),
+             float(r.humidity), float(r.wind), float(r.cloud), float(r.rain_prob),
              MODEL_NAME, version) for r in fc.itertuples(index=False)]
     raw_conn = engine.raw_connection()
     try:
         with raw_conn.cursor() as cur:
             execute_values(cur, """
                 INSERT INTO ml.predictions
-                    (location, made_at, target_ts, predicted_temp, model_name, model_version)
+                    (location, made_at, target_ts, predicted_temp, predicted_humidity,
+                     predicted_wind, predicted_cloud, rain_probability, model_name, model_version)
                 VALUES %s""", rows, page_size=1000)
         raw_conn.commit()
     finally:
@@ -69,10 +71,13 @@ def main():
                    f"{MODEL_NAME} v{version}; from {fc.target_ts.min()} to {fc.target_ts.max()}")
 
         local = fc.assign(date=fc["target_ts"].dt.tz_convert("Asia/Kolkata").dt.date)
-        daily = local.groupby("date")["predicted_temp"].agg(["min", "max"]).round(1)
+        daily = local.groupby("date").agg(min_C=("predicted_temp", "min"), max_C=("predicted_temp", "max"),
+                                          rain_chance=("rain_prob", "max"), humidity=("humidity", "mean"),
+                                          cloud=("cloud", "mean")).round(1)
+        daily["rain_chance"] = (daily["rain_chance"] * 100).round(0).astype(int).astype(str) + "%"
         print(f"Model: {MODEL_NAME} v{version} | forecast hours saved: {len(fc)}\n")
         print("7-day forecast for", location, "(IST)")
-        print(daily.rename(columns={"min": "min C", "max": "max C"}).to_string())
+        print(daily.to_string())
     except Exception as e:
         finish_run(engine, run_id, "failed", notes=str(e)[:500])
         raise

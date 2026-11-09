@@ -1,5 +1,5 @@
 """
-Feature engineering (SILVER -> GOLD), feature version v2 (location-agnostic).
+Feature engineering (SILVER -> GOLD), feature version v3 (location-agnostic, multi-target).
 
 Reads clean.weather_hourly, builds ML features and upserts them into
 features.weather_features. The SAME build_features() function is used by the
@@ -10,8 +10,11 @@ Features (only past/current values -> no data leakage):
     month, latitude           season + hemisphere/climate context
     temp_lag_1h/3h/24h        lag features
     temp_roll_mean_6h/24h     rolling means
-    humidity, pressure, wind_speed, cloud_cover
-Label (training only, added in training/train.py): temperature 24*d hours ahead.
+    humidity, pressure, wind_speed, cloud_cover          current conditions
+    humidity/cloud/wind_lag_24h, pressure_change_3h      weather memory & tendency
+    rain_6h, rain_24h                                    recent rainfall (mm)
+Labels (training only, added in training/train.py): temperature, humidity, wind,
+cloud cover and rain (yes/no) 24*d hours ahead, d = 1..7.
 
 Usage (from the project root):
     python -m features.build_features                    # monitored city, last 3 days
@@ -28,7 +31,7 @@ from sqlalchemy import text
 
 from common.db import finish_run, get_engine, start_run
 
-FEATURE_VERSION = "v2"
+FEATURE_VERSION = "v3"
 MAX_INTERPOLATE_HOURS = 3   # fill gaps up to 3 h; longer gaps stay empty
 
 FEATURE_COLS = [
@@ -36,6 +39,8 @@ FEATURE_COLS = [
     "temp_lag_1h", "temp_lag_3h", "temp_lag_24h",
     "temp_roll_mean_6h", "temp_roll_mean_24h",
     "humidity", "pressure", "wind_speed", "cloud_cover",
+    "humidity_lag_24h", "cloud_lag_24h", "wind_lag_24h", "pressure_change_3h",
+    "rain_6h", "rain_24h",
 ]
 TARGET = "target_temp_24h"
 
@@ -52,7 +57,7 @@ def load_locations(engine, only: str | None = None) -> pd.DataFrame:
 
 def load_clean(engine, location: str, since=None) -> pd.DataFrame:
     sql = """SELECT ts, temperature_2m, relative_humidity_2m, pressure_msl,
-                    wind_speed_10m, cloud_cover
+                    wind_speed_10m, cloud_cover, precipitation
              FROM clean.weather_hourly WHERE location = :loc"""
     params = {"loc": location}
     if since is not None:
@@ -98,7 +103,16 @@ def build_features(clean: pd.DataFrame, latitude: float, longitude: float) -> pd
     out["wind_speed"] = df["wind_speed_10m"]
     out["cloud_cover"] = df["cloud_cover"]
 
-    # 5. day-1 label kept in the table for convenience
+    # 5. weather memory, tendency and recent rain
+    out["humidity_lag_24h"] = df["relative_humidity_2m"].shift(24)
+    out["cloud_lag_24h"] = df["cloud_cover"].shift(24)
+    out["wind_lag_24h"] = df["wind_speed_10m"].shift(24)
+    out["pressure_change_3h"] = df["pressure_msl"] - df["pressure_msl"].shift(3)
+    rain = df["precipitation"].fillna(0) if "precipitation" in df else pd.Series(0.0, index=df.index)
+    out["rain_6h"] = rain.rolling(6, min_periods=6).sum()
+    out["rain_24h"] = rain.rolling(24, min_periods=24).sum()
+
+    # 6. day-1 temperature label kept in the table for convenience
     out[TARGET] = t.shift(-24)
 
     out = out[t.notna()].dropna(subset=FEATURE_COLS)
