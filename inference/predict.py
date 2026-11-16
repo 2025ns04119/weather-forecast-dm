@@ -13,12 +13,11 @@ import os
 
 import pandas as pd
 from psycopg2.extras import execute_values
-from sqlalchemy import text
 
 from common.db import finish_run, get_engine, start_run
 from common.model_loader import MODEL_NAME, load_champion
 from feature_store.store import FeatureStore
-from features.build_features import FEATURE_COLS, FEATURE_VERSION
+from features.build_features import FEATURE_VERSION
 
 MAX_FEATURE_AGE_HOURS = 6   # refuse to forecast from stale data
 

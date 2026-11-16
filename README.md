@@ -6,7 +6,26 @@ This project predicts the weather for the next 7 days for any city, using live d
 - **Code:** https://github.com/2025ns04119/weather-forecast-dm
 - **Models and experiments:** https://dagshub.com/2025ns04119/weather-forecast-dm
 
-**Pipeline:** Open-Meteo API → `raw` (bronze) → validation → `clean` (silver) → `features` (gold) → 7-day model → `ml.predictions` → Streamlit app
+**Pipeline:** Open-Meteo API + city catalogue CSV → data lake + `raw` (bronze) → validation → `clean` (silver) → `features` (gold) → feature store → 7-day model (MLflow) → `ml.predictions` → Streamlit app.
+Orchestrated with **Prefect** (`orchestration/flow.py`), run every hour by **GitHub Actions**, visible in **Prefect Cloud**.
+
+### Project structure
+| Folder | Contents |
+|---|---|
+| `ingestion/` | API ingestion (`fetch_weather.py`, `open_meteo.py`) and CSV ingestion (`ingest_csv.py`) |
+| `validation/` | Validation + cleaning with Great Expectations (`clean_weather.py`), data quality report (`quality_report.py`) |
+| `features/` | Feature engineering (`build_features.py`), dataset export for DVC (`export_datasets.py`) |
+| `feature_store/` | Feature registry (`registry.yaml`), retrieval API (`store.py`), demo (`demo_retrieval.py`) |
+| `training/` | Multi-horizon training + MLflow (`train.py`, `multi_horizon.py`), performance report (`performance_report.py`) |
+| `inference/` | Hourly forecast (`predict.py`), forecast for any city (`on_demand.py`) |
+| `orchestration/` | Prefect flow - the pipeline DAG (`flow.py`) |
+| `common/` | Database, logging, data lake, model loading, derived weather values |
+| `dashboard/` | Streamlit app |
+| `infra/` | Database schema and migrations (Neon) |
+| `notebooks/` | Exploratory data analysis (`eda.ipynb`) |
+| `data/` | City catalogue CSV (`sources/`), raw data lake (`raw/`), DVC pointers |
+| `docs/` | Storage layout, feature store, versioning and lineage |
+| `.github/workflows/` | Hourly pipeline (GitHub Actions) |
 
 ---
 
@@ -73,8 +92,7 @@ Menu **Terminal → New Terminal**. A PowerShell terminal opens at the bottom of
 py -3.11 -m venv venv
 venv\Scripts\activate
 python -m pip install --upgrade pip
-pip install -r requirements.txt -r requirements-pipeline.txt -r dashboard/requirements.txt
-pip install mlflow xgboost scikit-learn great_expectations dvc
+python -m pip install -r requirements.txt
 ```
 - The terminal prompt now starts with `(venv)`.
 - Installing the packages takes about 5–10 minutes.
@@ -111,12 +129,18 @@ Make sure the prompt shows `(venv)`. Run these one at a time:
 
 | # | Command | What it does |
 |---|---------|--------------|
-| 1 | `python -m ingestion.fetch_weather --mode live` | Downloads the last 7 days of live weather and stores the raw JSON (bronze) |
-| 2 | `python -m validation.clean_weather` | Checks the values, cleans them into the silver layer and moves bad rows to quarantine |
-| 3 | `python -m features.build_features` | Builds the model features (gold layer) |
-| 4 | `python -m inference.predict` | Loads the champion model from DagsHub and prints the 7-day forecast |
+| 1 | `python -m ingestion.ingest_csv` | Loads the city catalogue CSV (skipped if unchanged) |
+| 2 | `python -m ingestion.fetch_weather --mode live` | Downloads the last 7 days of live weather; raw JSON goes to `data/raw/` and the bronze table |
+| 3 | `python -m validation.clean_weather` | Checks the values, cleans them into the silver layer and moves bad rows to quarantine |
+| 4 | `python -m features.build_features` | Builds the model features (gold layer) |
+| 5 | `python -m feature_store.store --sync --check` | Syncs the feature registry and checks it against the code |
+| 6 | `python -m inference.predict` | Loads the champion model from DagsHub and prints the 7-day forecast |
 
-- After step 4 you will see a table with 7 rows (one per day), showing the minimum and maximum temperature, rain chance, humidity and cloud cover.
+**All steps at once (Prefect flow):** `python -m orchestration.flow` (add `--report` for the data quality report).
+
+**Reports:** `python -m validation.quality_report` · `python -m training.performance_report` · notebook `notebooks/eda.ipynb` · demo `python -m feature_store.demo_retrieval`
+
+- After step 6 you will see a table with 7 rows (one per day), showing the minimum and maximum temperature, rain chance, humidity and cloud cover.
 - These steps are safe to repeat. GitHub Actions also runs them automatically every hour.
 
 > **Do not run** `infra/setup_neon.py`, the `migrate_*.sql` files or `training.train` unless the team agrees. The database is already set up, and training replaces the live model.
@@ -127,7 +151,7 @@ Make sure the prompt shows `(venv)`. Run these one at a time:
 
 ### 6.1 On your laptop
 ```powershell
-streamlit run dashboard/app.py
+python -m streamlit run dashboard/app.py
 ```
 - Your browser opens http://localhost:8501.
 - **Weather page:** Bengaluru is shown by default. Type any city in the search bar and select it to see that city's forecast.
@@ -156,6 +180,7 @@ git pull
 | `password authentication failed` | Copy the Neon connection string into `.env` again |
 | `401` / `Unauthorized` (DagsHub or DVC) | Use your own DagsHub username and token, and check that you accepted the DagsHub invite |
 | `No registered versions of 'weather-7day'` | Check that `MLFLOW_TRACKING_URI` in `.env` is exactly as shown above |
-| Forecast says the features are too old | Run commands 1–3 again, then command 4 |
+| Forecast says the features are too old | Run commands 2–4 again, then command 6 |
+| `Fatal error in launcher` for `pip`, `dvc`, `prefect` | Use `python -m pip …`, `python -m dvc …`, `python -m prefect …` |
 
 **Team rule:** never share `.env`, your token or your connection string in chat or in screenshots.
