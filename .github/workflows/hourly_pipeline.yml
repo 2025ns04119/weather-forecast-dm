@@ -1,11 +1,21 @@
-# Hourly data + forecast pipeline (runs in the cloud on GitHub Actions)
-# ingest (city CSV + Open-Meteo API) -> validate/clean -> features -> 7-day forecast  ==> Neon
+# Weather data pipeline - runs in the cloud on GitHub Actions
+# GitHub Actions = scheduler + runner; Prefect Cloud = orchestrator UI (orchestration/flow.py):
+# ingest (city CSV + Open-Meteo API) -> validate/clean -> features -> feature store -> [train] -> 7-day forecast
 name: Hourly weather pipeline
 
 on:
   schedule:
-    - cron: "17 * * * *"      # every hour at minute 17 (UTC)
-  workflow_dispatch:           # "Run workflow" button for manual runs
+    - cron: "17 * * * *"      # every hour at minute 17 (UTC): data + forecast
+  workflow_dispatch:           # "Run workflow" button
+    inputs:
+      train:
+        description: "Retrain the model (and build the model performance report)"
+        type: boolean
+        default: false
+      report:
+        description: "Build the data quality report"
+        type: boolean
+        default: false
 
 concurrency:                   # never run two pipelines at the same time
   group: hourly-pipeline
@@ -14,12 +24,14 @@ concurrency:                   # never run two pipelines at the same time
 jobs:
   pipeline:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 45
     env:
       NEON_DB_URL: ${{ secrets.NEON_DB_URL }}
       MLFLOW_TRACKING_URI: ${{ secrets.MLFLOW_TRACKING_URI }}
       MLFLOW_TRACKING_USERNAME: ${{ secrets.MLFLOW_TRACKING_USERNAME }}
       MLFLOW_TRACKING_PASSWORD: ${{ secrets.MLFLOW_TRACKING_PASSWORD }}
+      PREFECT_API_URL: ${{ secrets.PREFECT_API_URL }}
+      PREFECT_API_KEY: ${{ secrets.PREFECT_API_KEY }}
       LAT: "12.97"
       LON: "77.59"
       LOCATION: "Bengaluru"
@@ -39,28 +51,24 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements-pipeline.txt
 
-      - name: 0. Ingest city catalogue CSV (skipped if unchanged)
-        run: python -m ingestion.ingest_csv
+      - name: Run the Prefect flow
+        run: >
+          python -m orchestration.flow
+          ${{ inputs.train && '--train' || '' }}
+          ${{ inputs.report && '--report' || '' }}
 
-      - name: 1. Ingest live weather (bronze)
-        run: python -m ingestion.fetch_weather --mode live
+      - name: Model performance report (after training)
+        if: ${{ inputs.train }}
+        run: python -m training.performance_report
 
-      - name: 2. Validate and clean (silver)
-        run: python -m validation.clean_weather
-
-      - name: 3. Build features (gold)
-        run: python -m features.build_features
-
-      - name: 4. 7-day forecast
-        run: python -m inference.predict
-
-      - name: Keep logs and raw data-lake files from this run
+      - name: Keep logs, reports and raw data-lake files from this run
         if: always()                     # also after a failure, for the audit trail
         uses: actions/upload-artifact@v4
         with:
-          name: run-${{ github.run_number }}-logs-and-raw
+          name: run-${{ github.run_number }}-logs-reports-raw
           path: |
             logs/
+            reports/
             data/raw/
           retention-days: 30
           if-no-files-found: ignore

@@ -2,7 +2,7 @@
 Batch inference: 7-day hourly forecast of temperature, humidity, wind, cloud cover and rain chance.
 
 1. Load the champion model (weather-temp-7day) from the MLflow registry
-2. Read the latest 24 hourly feature rows from features.weather_features
+2. Read the latest 24 hourly feature rows from the feature store (features.weather_features)
 3. Forecast the next 168 hours (7 days)
 4. Save to ml.predictions (with model name + version -> lineage)
 
@@ -17,20 +17,15 @@ from sqlalchemy import text
 
 from common.db import finish_run, get_engine, start_run
 from common.model_loader import MODEL_NAME, load_champion
+from feature_store.store import FeatureStore
 from features.build_features import FEATURE_COLS, FEATURE_VERSION
 
 MAX_FEATURE_AGE_HOURS = 6   # refuse to forecast from stale data
 
 
 def latest_features(engine, location: str) -> pd.DataFrame:
-    with engine.connect() as conn:
-        df = pd.read_sql(text(f"""
-            SELECT ts, {", ".join(FEATURE_COLS)} FROM features.weather_features
-            WHERE location = :loc AND feature_version = :v
-            ORDER BY ts DESC LIMIT 24"""), conn,
-            params={"loc": location, "v": FEATURE_VERSION})
-    df["ts"] = pd.to_datetime(df["ts"], utc=True)
-    return df.sort_values("ts").reset_index(drop=True)
+    """Latest 24 hourly feature rows from the feature store (online retrieval)."""
+    return FeatureStore(engine).get_online_features(location, FEATURE_VERSION, n_hours=24)
 
 
 def save_predictions(engine, fc: pd.DataFrame, location: str, version: str, made_at):

@@ -44,6 +44,7 @@ from sqlalchemy import text
 from xgboost import XGBClassifier, XGBRegressor
 
 from common.db import finish_run, get_engine, start_run
+from feature_store.store import FeatureStore
 from features.build_features import FEATURE_COLS, FEATURE_VERSION
 from training.multi_horizon import (HORIZON_DAYS, RAIN_THRESHOLD_MM, TARGETS,
                                     MultiHorizonModel)
@@ -65,16 +66,13 @@ def label(target: str, d: int) -> str:
 
 # ---------------------------------------------------------------- data
 def load_data(engine) -> pd.DataFrame:
+    # features come from the feature store (versioned retrieval, same registry as inference)
+    feats = FeatureStore(engine).get_training_features(FEATURE_VERSION)
     with engine.connect() as conn:
-        feats = pd.read_sql(text(f"""
-            SELECT location, ts, {", ".join(FEATURE_COLS)} FROM features.weather_features
-            WHERE feature_version = :v ORDER BY location, ts"""),
-            conn, params={"v": FEATURE_VERSION})
         clean = pd.read_sql(text("""
             SELECT location, ts, temperature_2m, relative_humidity_2m, wind_speed_10m,
                    cloud_cover, precipitation
             FROM clean.weather_hourly ORDER BY location, ts"""), conn)
-    feats["ts"] = pd.to_datetime(feats["ts"], utc=True)
     clean["ts"] = pd.to_datetime(clean["ts"], utc=True)
     return add_labels(feats, clean)
 
