@@ -1,3 +1,4 @@
+# Streamlit app settings: light theme with the project's blue, minimal toolbar
 [theme]
 base = "light"
 primaryColor = "#2a78d6"

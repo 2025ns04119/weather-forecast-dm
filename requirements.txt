@@ -1,8 +1,0 @@
-# Full environment for a laptop: pipeline + dashboard + notebook + data versioning
-#   python -m pip install -r requirements.txt
-# (GitHub Actions installs only requirements-pipeline.txt; Streamlit Cloud only dashboard/requirements.txt)
--r requirements-pipeline.txt
--r dashboard/requirements.txt
-dvc>=3.50
-jupyter
-ipykernel

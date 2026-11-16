@@ -1,9 +1,9 @@
 # Data versioning + EDA (manual): runs in the cloud, commits the results back to the repo
 #   1. restore the previous raw data-lake version (DVC) and run the Prefect flow (+ quality report)
 #   2. export the prepared (silver) and feature (gold) datasets
-#   3. execute the EDA notebook (plots -> reports/figures)
+#   3. EDA plots + summary (pipeline/data_preparation/eda.py, run by the flow) -> reports/
 #   4. version data/raw, data/prepared, data/features with DVC -> DagsHub
-#   5. commit the .dvc pointer files, notebook output and reports to GitHub
+#   5. commit the .dvc pointer files and reports to GitHub
 name: Data versioning and EDA
 
 on:
@@ -43,10 +43,10 @@ jobs:
           cache: pip
           cache-dependency-path: requirements-pipeline.txt
 
-      - name: Install dependencies (+ DVC and notebook runner)
+      - name: Install dependencies (+ DVC)
         run: |
           pip install -r requirements-pipeline.txt
-          pip install "dvc>=3.50" nbconvert ipykernel
+          pip install "dvc>=3.50"
 
       - name: Connect DVC to DagsHub storage
         run: |
@@ -58,16 +58,11 @@ jobs:
         run: |
           if [ -f data/raw.dvc ]; then dvc pull data/raw.dvc; fi
 
-      - name: Run the Prefect flow with the data quality report
-        run: python -m orchestration.flow --report
+      - name: Run the Prefect flow with the data quality and EDA reports
+        run: python -m pipeline.orchestration.flow --report
 
       - name: Export prepared and feature datasets
-        run: python -m features.export_datasets
-
-      - name: Execute the EDA notebook
-        run: |
-          jupyter nbconvert --to notebook --execute notebooks/eda.ipynb \
-            --ExecutePreprocessor.timeout=900 --output eda_executed.ipynb --output-dir reports
+        run: python -m pipeline.versioning_lineage.export_datasets
 
       - name: Version the data with DVC and push to DagsHub
         run: |

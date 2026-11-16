@@ -1,0 +1,8 @@
+# FULL environment for team members: pipeline + web app + data versioning (DVC).
+# Install on your laptop:   python -m pip install -r requirements-full.txt
+# Related files:
+#   requirements-pipeline.txt   -> packages for the automated pipeline (installed by GitHub Actions)
+#   dashboard/requirements.txt  -> packages for the web app (installed by Streamlit Cloud; must keep this name)
+-r requirements-pipeline.txt
+-r dashboard/requirements.txt
+dvc>=3.50

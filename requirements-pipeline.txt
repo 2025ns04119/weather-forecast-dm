@@ -1,3 +1,5 @@
+# Packages for the AUTOMATED PIPELINE (installed by GitHub Actions in the cloud).
+# Team members install requirements-full.txt instead, which includes this file.
 great_expectations==1.24.1
 mlflow==3.18.0
 numpy==2.4.6

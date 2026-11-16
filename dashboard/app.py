@@ -4,7 +4,7 @@ Weather app - current weather, hourly and 7-day forecast for ANY place.
 Every number on the Weather screen is produced by this project:
     forecasts (temperature, humidity, wind, cloud, rain chance)  -> ML model weather-7day
     current conditions                                           -> latest validated observation
-    condition/icon, feels like, UV index, sunrise/sunset         -> our calculations (common/derived.py)
+    condition/icon, feels like, UV index, sunrise/sunset         -> our calculations (pipeline/common/derived.py)
 Open-Meteo is only the raw data source.
 
 Bengaluru (default) uses the stored hourly-pipeline forecast; any searched place is
@@ -41,8 +41,8 @@ for _k in ["NEON_DB_URL", "MLFLOW_TRACKING_URI", "MLFLOW_TRACKING_USERNAME", "ML
         except Exception:
             pass
 
-from config.locations import DEFAULT_LOCATION          # noqa: E402
-from ingestion.open_meteo import geocode               # noqa: E402
+from pipeline.data_collection.locations import DEFAULT_LOCATION          # noqa: E402
+from pipeline.data_collection.open_meteo import geocode               # noqa: E402
 import weather_view as wv                              # noqa: E402
 
 try:
@@ -104,7 +104,7 @@ def query(sql: str, **params) -> pd.DataFrame:
 
 @st.cache_resource(show_spinner="Preparing the forecast model (first time only)…")
 def get_model():
-    from common.model_loader import load_champion
+    from pipeline.common.model_loader import load_champion
     return load_champion()
 
 
@@ -115,7 +115,7 @@ def search_places(q: str) -> list[dict]:
 
 @st.cache_data(ttl=1800, show_spinner=False)
 def on_demand(name: str, lat: float, lon: float) -> dict:
-    from inference.on_demand import forecast_location
+    from pipeline.model_deployment.on_demand import forecast_location
     model, version = get_model()
     out = forecast_location(model, name, lat, lon)
     return {"forecast": out["forecast"], "observed": out["observed"], "made_at": out["made_at"]}

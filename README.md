@@ -1,31 +1,92 @@
-# Weather Forecast Prediction – Data Management for ML
+# Weather Forecast Prediction – End-to-End Data Management Pipeline
 
-This project predicts the weather for the next 7 days for any city, using live data from the [Open-Meteo](https://open-meteo.com) API.
+Predicts the weather for the **next 7 days for any city** from **live data** (Open-Meteo REST API + a curated city
+catalogue CSV), with a pipeline that covers every stage of data management for ML: collection, ingestion,
+raw storage, profiling and validation, preparation, feature engineering, feature store, versioning and lineage,
+training, evaluation and orchestration.
 
-- **Live app:** https://weather-forecast-dm.streamlit.app
-- **Code:** https://github.com/2025ns04119/weather-forecast-dm
-- **Models and experiments:** https://dagshub.com/2025ns04119/weather-forecast-dm
-
-**Pipeline:** Open-Meteo API + city catalogue CSV → data lake + `raw` (bronze) → validation → `clean` (silver) → `features` (gold) → feature store → 7-day model (MLflow) → `ml.predictions` → Streamlit app.
-Orchestrated with **Prefect** (`orchestration/flow.py`), run every hour by **GitHub Actions**, visible in **Prefect Cloud**.
-
-### Project structure
-| Folder | Contents |
+| | Link |
 |---|---|
-| `ingestion/` | API ingestion (`fetch_weather.py`, `open_meteo.py`) and CSV ingestion (`ingest_csv.py`) |
-| `validation/` | Validation + cleaning with Great Expectations (`clean_weather.py`), data quality report (`quality_report.py`) |
-| `features/` | Feature engineering (`build_features.py`), dataset export for DVC (`export_datasets.py`) |
-| `feature_store/` | Feature registry (`registry.yaml`), retrieval API (`store.py`), demo (`demo_retrieval.py`) |
-| `training/` | Multi-horizon training + MLflow (`train.py`, `multi_horizon.py`), performance report (`performance_report.py`) |
-| `inference/` | Hourly forecast (`predict.py`), forecast for any city (`on_demand.py`) |
-| `orchestration/` | Prefect flow - the pipeline DAG (`flow.py`) |
-| `common/` | Database, logging, data lake, model loading, derived weather values |
-| `dashboard/` | Streamlit app |
-| `infra/` | Database schema and migrations (Neon) |
-| `notebooks/` | Exploratory data analysis (`eda.ipynb`) |
-| `data/` | City catalogue CSV (`sources/`), raw data lake (`raw/`), DVC pointers |
-| `docs/` | Storage layout, feature store, versioning and lineage |
-| `.github/workflows/` | Hourly pipeline (GitHub Actions) |
+| Live app | https://weather-forecast-dm.streamlit.app |
+| Code | https://github.com/2025ns04119/weather-forecast-dm |
+| Experiments, models, data versions | https://dagshub.com/2025ns04119/weather-forecast-dm |
+| Pipeline runs (orchestration) | Prefect Cloud workspace of the project owner |
+
+**Flow:** Open-Meteo API + `cities.csv` → data lake + `raw` (bronze) → validation → `clean` (silver) → features (gold)
+→ feature store → 7-day models (MLflow) → `ml.predictions` → Streamlit app. Orchestrated by **Prefect**
+(`pipeline/orchestration/flow.py`), run every hour by **GitHub Actions**, monitored in **Prefect Cloud**.
+
+---
+
+## Project structure
+
+```
+weather-forecast-dm/
+├── pipeline/                         all pipeline code, one folder per stage
+│   ├── data_collection/              1  data sources
+│   ├── data_ingestion/               2  pull data into raw storage
+│   ├── raw_data_storage/             3  partitioned data lake
+│   ├── profiling_validation/         4  data quality checks and report
+│   ├── data_preparation/             5  exploratory data analysis
+│   ├── feature_engineering/          6  model features (gold layer)
+│   ├── feature_store/                7  feature registry + versioned retrieval
+│   ├── versioning_lineage/           8  dataset export for DVC + lineage
+│   ├── model_training/               9  multi-horizon training with MLflow
+│   ├── model_evaluation/            10  metrics, baselines, performance report
+│   ├── model_deployment/                serves the model: hourly and on-demand forecasts
+│   ├── orchestration/               11  Prefect flow (the DAG)
+│   └── common/                          shared helpers
+├── dashboard/                        Streamlit web app
+├── infra/                            database schema (Neon PostgreSQL)
+├── data/                             sources, raw data lake, DVC pointers
+├── reports/                          generated reports and figures (created by the pipeline)
+├── .github/workflows/                cloud automation (GitHub Actions)
+├── requirements-full.txt             all packages (install this on a laptop)
+└── requirements-pipeline.txt         pipeline packages (GitHub Actions)
+```
+
+### What each file does
+
+| Stage | File | Purpose |
+|---|---|---|
+| **1 Data collection** | `pipeline/data_collection/open_meteo.py` | Open-Meteo REST API client: forecast, archive and geocoding endpoints, with retries |
+| | `pipeline/data_collection/locations.py` | Default monitored city (Bengaluru) and fallback list of training cities |
+| | `data/sources/cities.csv` | City catalogue (32 cities) – the second, structured data source |
+| **2 Data ingestion** | `pipeline/data_ingestion/fetch_weather.py` | Ingests API data (live hourly / history backfill / all cities) into the data lake and `raw.weather_api` |
+| | `pipeline/data_ingestion/ingest_csv.py` | Validates and loads the city catalogue CSV into `raw.city_catalogue` and `clean.locations` |
+| **3 Raw data storage** | `pipeline/raw_data_storage/datalake.py` | Saves every raw file unchanged under `data/raw/source=…/type=…/date=…/` and records it in `_manifest.csv` |
+| | `pipeline/raw_data_storage/README.md` | Storage layout documentation (lake folders, bronze tables, logs) |
+| **4 Profiling & validation** | `pipeline/profiling_validation/clean_weather.py` | Range/required-field rules, Great Expectations suite, quarantine; writes the silver layer |
+| | `pipeline/profiling_validation/quality_report.py` | Data quality report (PDF + JSON): missing values, duplicates, ranges, completeness, quarantine |
+| **5 Data preparation** | `pipeline/data_preparation/eda.py` | EDA: 7 plots + summary of distributions, correlations, seasonality, sparsity, completeness |
+| **6 Feature engineering** | `pipeline/feature_engineering/build_features.py` | Builds 18 features (lags, rolling means, solar hour, rain totals …), version v3, gold layer |
+| **7 Feature store** | `pipeline/feature_store/registry.yaml` | Feature metadata: name, source, transformation, versions |
+| | `pipeline/feature_store/store.py` | Registry sync/check and versioned retrieval for training and inference |
+| | `pipeline/feature_store/demo_retrieval.py` | Demonstrates training and online retrieval for different versions |
+| | `pipeline/feature_store/README.md` | Feature store documentation |
+| **8 Versioning & lineage** | `pipeline/versioning_lineage/export_datasets.py` | Exports the silver and gold layers to `data/prepared/` and `data/features/` for DVC |
+| | `pipeline/versioning_lineage/README.md` | What is versioned with Git / DVC / MLflow, the versioning workflow and the lineage chain |
+| **9 Model training** | `pipeline/model_training/train.py` | Trains 5 targets × 7 days, logs to MLflow, registers the champion `weather-7day` |
+| | `pipeline/model_training/multi_horizon.py` | The combined 7-day multi-target model class and target definitions |
+| **10 Model evaluation** | `pipeline/model_evaluation/metrics.py` | MAE, RMSE, R², Brier, AUC and persistence/climatology baselines |
+| | `pipeline/model_evaluation/performance_report.py` | Model vs baseline report (PDF + CSV) from MLflow |
+| **Model deployment** | `pipeline/model_deployment/predict.py` | Hourly 7-day forecast for Bengaluru, saved to `ml.predictions` |
+| | `pipeline/model_deployment/on_demand.py` | Forecast for any searched city, in memory (used by the app) |
+| **11 Orchestration** | `pipeline/orchestration/flow.py` | Prefect flow: CSV → API → validate → [reports] → features → feature store → [train] → predict |
+| | `.github/workflows/hourly_pipeline.yml` | Runs the flow every hour in the cloud; buttons to retrain and build reports |
+| | `.github/workflows/data_versioning.yml` | Cloud job: reports + EDA, dataset export, DVC versioning, commits the results |
+| **Shared** | `pipeline/common/db.py` | Neon connection and the pipeline run log (`ml.pipeline_runs`) |
+| | `pipeline/common/logger.py` | Writes every step to the console and `logs/<step>.log` |
+| | `pipeline/common/model_loader.py` | Loads the champion model from the MLflow registry |
+| | `pipeline/common/derived.py` | Feels-like temperature, UV estimate, sunrise/sunset, weather condition (used by the app) |
+| **App** | `dashboard/app.py`, `dashboard/weather_view.py` | Streamlit app: weather for any city + Insights page (accuracy, pipeline health) |
+| **Database** | `infra/neon_init.sql`, `infra/migrate_v2…v5.sql` | Schema: `raw`, `clean`, `quarantine`, `features`, `ml` |
+| | `infra/run_sql.py`, `infra/setup_neon.py` | Run a SQL file / one-time database setup |
+| **Packages** | `requirements-full.txt` | **Everything** – what a team member installs on a laptop |
+| | `requirements-pipeline.txt` | Pipeline packages only – installed by GitHub Actions |
+| | `dashboard/requirements.txt` | Web app packages only – installed by Streamlit Cloud (this exact name is required) |
+| **Config** | `.env.example` | Template for your private `.env` settings |
+| | `.gitignore`, `.dvcignore`, `.dvc/`, `data/**/*.dvc` | Git/DVC rules and DVC data pointers |
 
 ---
 
@@ -92,7 +153,7 @@ Menu **Terminal → New Terminal**. A PowerShell terminal opens at the bottom of
 py -3.11 -m venv venv
 venv\Scripts\activate
 python -m pip install --upgrade pip
-python -m pip install -r requirements.txt
+python -m pip install -r requirements-full.txt
 ```
 - The terminal prompt now starts with `(venv)`.
 - Installing the packages takes about 5–10 minutes.
@@ -115,35 +176,50 @@ Don't put spaces around `=`, and don't use quotes. Git never uploads `.env`, so 
 
 ### 4.4 Download the versioned training data (DVC)
 ```powershell
-dvc remote modify origin --local auth basic
-dvc remote modify origin --local user <your DagsHub username>
-dvc remote modify origin --local password <your DagsHub token>
-dvc pull
+python -m dvc remote modify origin --local auth basic
+python -m dvc remote modify origin --local user <your DagsHub username>
+python -m dvc remote modify origin --local password <your DagsHub token>
+python -m dvc pull
 ```
 
 ---
 
-## 5. Execute the project (in the VS Code terminal)
+## 5. Run the pipeline
 
-Make sure the prompt shows `(venv)`. Run these one at a time:
+Make sure the prompt shows `(venv)`.
 
-| # | Command | What it does |
-|---|---------|--------------|
-| 1 | `python -m ingestion.ingest_csv` | Loads the city catalogue CSV (skipped if unchanged) |
-| 2 | `python -m ingestion.fetch_weather --mode live` | Downloads the last 7 days of live weather; raw JSON goes to `data/raw/` and the bronze table |
-| 3 | `python -m validation.clean_weather` | Checks the values, cleans them into the silver layer and moves bad rows to quarantine |
-| 4 | `python -m features.build_features` | Builds the model features (gold layer) |
-| 5 | `python -m feature_store.store --sync --check` | Syncs the feature registry and checks it against the code |
-| 6 | `python -m inference.predict` | Loads the champion model from DagsHub and prints the 7-day forecast |
+**All stages at once (Prefect flow):**
+```powershell
+python -m pipeline.orchestration.flow             # hourly run: data + forecast
+python -m pipeline.orchestration.flow --report    # + data quality report and EDA
+python -m pipeline.orchestration.flow --train     # + retrain the model (only if the team agrees)
+```
 
-**All steps at once (Prefect flow):** `python -m orchestration.flow` (add `--report` for the data quality report).
+**Stage by stage:**
 
-**Reports:** `python -m validation.quality_report` · `python -m training.performance_report` · notebook `notebooks/eda.ipynb` · demo `python -m feature_store.demo_retrieval`
+| Stage | Command | Output |
+|---|---|---|
+| 2 Ingestion (CSV) | `python -m pipeline.data_ingestion.ingest_csv` | `clean.locations` (skipped if the CSV is unchanged) |
+| 2 Ingestion (API) | `python -m pipeline.data_ingestion.fetch_weather --mode live` | `data/raw/…json` + `raw.weather_api` |
+| 4 Validation | `python -m pipeline.profiling_validation.clean_weather` | `clean.weather_hourly`, `quarantine.weather_rejects` |
+| 4 Quality report | `python -m pipeline.profiling_validation.quality_report` | `reports/data_quality_report.pdf` |
+| 5 EDA | `python -m pipeline.data_preparation.eda` | `reports/figures/*.png`, `reports/eda_summary.md` |
+| 6 Features | `python -m pipeline.feature_engineering.build_features` | `features.weather_features` |
+| 7 Feature store | `python -m pipeline.feature_store.store --sync --check` | `features.feature_registry` |
+| 7 Feature demo | `python -m pipeline.feature_store.demo_retrieval` | Retrieval demo in the terminal |
+| 8 Export for DVC | `python -m pipeline.versioning_lineage.export_datasets` | `data/prepared/`, `data/features/` |
+| 9 Training | `python -m pipeline.model_training.train` | New model version in MLflow (alias `champion`) |
+| 10 Evaluation | `python -m pipeline.model_evaluation.performance_report` | `reports/model_performance.pdf` |
+| Model deployment | `python -m pipeline.model_deployment.predict` | 7-day forecast in `ml.predictions` |
 
-- After step 6 you will see a table with 7 rows (one per day), showing the minimum and maximum temperature, rain chance, humidity and cloud cover.
-- These steps are safe to repeat. GitHub Actions also runs them automatically every hour.
+> **Do not run** `infra/setup_neon.py`, the `migrate_*.sql` files or training unless the team agrees. The database is
+> already set up, and training replaces the live model.
 
-> **Do not run** `infra/setup_neon.py`, the `migrate_*.sql` files or `training.train` unless the team agrees. The database is already set up, and training replaces the live model.
+### In the cloud (no laptop needed)
+- **Hourly pipeline:** GitHub → Actions → *Hourly weather pipeline* runs every hour. **Run workflow** → tick *train* /
+  *report* to retrain or build reports. Results are in each run's **Artifacts** and in **Prefect Cloud → Runs**.
+- **Data versioning and EDA:** GitHub → Actions → *Data versioning and EDA* → **Run workflow**. Commits the DVC
+  data versions and reports back to the repository.
 
 ---
 
@@ -154,33 +230,35 @@ Make sure the prompt shows `(venv)`. Run these one at a time:
 python -m streamlit run dashboard/app.py
 ```
 - Your browser opens http://localhost:8501.
-- **Weather page:** Bengaluru is shown by default. Type any city in the search bar and select it to see that city's forecast.
+- **Weather page:** Bengaluru is shown by default. Type any city in the search bar to see its forecast.
 - Switch between the **Hourly** and **7 days** views.
-- **Insights page** (top menu): forecast accuracy, pipeline runs and data-quality counts.
+- **Insights page:** forecast accuracy, pipeline runs and data-quality counts.
 - Press **Ctrl+C** in the terminal to stop the app.
 
 ### 6.2 Online (no setup needed)
-Open https://weather-forecast-dm.streamlit.app. If it says *"This app has gone to sleep"*, click **Yes, get this app back up** and wait about 1 minute.
+Open https://weather-forecast-dm.streamlit.app. If it says *"This app has gone to sleep"*, click
+**Yes, get this app back up** and wait about 1 minute.
 
 ---
 
 ## 7. Next time you open the project
-Open the project folder in VS Code, then in the terminal run:
 ```powershell
 venv\Scripts\activate
 git pull
+python -m dvc pull
 ```
 
 ## 8. Common problems
 
 | Problem | Fix |
 |---|---|
-| `activate` is blocked | Run `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned` |
-| `No module named ...` | Make sure `(venv)` shows in the prompt, then repeat step 4.2 |
+| `activate` is blocked | `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned` |
+| `No module named pipeline` | Run commands from the project root folder (where `README.md` is) |
+| `No module named …` (a package) | Make sure `(venv)` shows, then `python -m pip install -r requirements-full.txt` |
+| `Fatal error in launcher` for `pip`, `dvc`, `prefect`, `streamlit` | Use `python -m pip …`, `python -m dvc …`, `python -m prefect …`, `python -m streamlit …` |
 | `password authentication failed` | Copy the Neon connection string into `.env` again |
-| `401` / `Unauthorized` (DagsHub or DVC) | Use your own DagsHub username and token, and check that you accepted the DagsHub invite |
-| `No registered versions of 'weather-7day'` | Check that `MLFLOW_TRACKING_URI` in `.env` is exactly as shown above |
-| Forecast says the features are too old | Run commands 2–4 again, then command 6 |
-| `Fatal error in launcher` for `pip`, `dvc`, `prefect` | Use `python -m pip …`, `python -m dvc …`, `python -m prefect …` |
+| `401` / `Unauthorized` (DagsHub or DVC) | Use your own DagsHub username and token; accept the DagsHub invite |
+| `No registered versions of 'weather-7day'` | Check `MLFLOW_TRACKING_URI` in `.env` |
+| Forecast says the features are too old | Run the API ingestion, validation and features steps, then predict |
 
 **Team rule:** never share `.env`, your token or your connection string in chat or in screenshots.

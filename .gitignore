@@ -1,3 +1,4 @@
+# Files Git must never upload: virtual environment, secrets, caches and local logs
 venv/
 .env
 __pycache__/

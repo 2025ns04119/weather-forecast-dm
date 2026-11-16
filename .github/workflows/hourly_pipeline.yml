@@ -1,5 +1,5 @@
 # Weather data pipeline - runs in the cloud on GitHub Actions
-# GitHub Actions = scheduler + runner; Prefect Cloud = orchestrator UI (orchestration/flow.py):
+# GitHub Actions = scheduler + runner; Prefect Cloud = orchestrator UI (pipeline/orchestration/flow.py):
 # ingest (city CSV + Open-Meteo API) -> validate/clean -> features -> feature store -> [train] -> 7-day forecast
 name: Hourly weather pipeline
 
@@ -13,7 +13,7 @@ on:
         type: boolean
         default: false
       report:
-        description: "Build the data quality report"
+        description: "Build the data quality and EDA reports"
         type: boolean
         default: false
 
@@ -53,13 +53,13 @@ jobs:
 
       - name: Run the Prefect flow
         run: >
-          python -m orchestration.flow
+          python -m pipeline.orchestration.flow
           ${{ inputs.train && '--train' || '' }}
           ${{ inputs.report && '--report' || '' }}
 
       - name: Model performance report (after training)
         if: ${{ inputs.train }}
-        run: python -m training.performance_report
+        run: python -m pipeline.model_evaluation.performance_report
 
       - name: Keep logs, reports and raw data-lake files from this run
         if: always()                     # also after a failure, for the audit trail

@@ -1,3 +1,10 @@
+// VS Code settings for this project: load .env in terminals, hide generated folders in the Explorer
 {
-    "python.terminal.useEnvFile": true
+    "python.terminal.useEnvFile": true,
+    "files.exclude": {
+        "**/__pycache__": true,
+        "venv": true,
+        "logs": true,
+        ".pytest_cache": true
+    }
 }

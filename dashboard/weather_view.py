@@ -3,12 +3,12 @@ Builds everything the Weather screen shows - ALL computed by this project:
 
     temperature, humidity, wind, cloud, rain chance   -> the ML model (weather-7day)
     current conditions                                -> latest validated observation (silver layer)
-    condition text + icon, feels like, UV, sunrise    -> common/derived.py calculations
+    condition text + icon, feels like, UV, sunrise    -> pipeline/common/derived.py calculations
 """
 import numpy as np
 import pandas as pd
 
-from common.derived import (apparent_temperature, compass, condition, solar_elevation,
+from pipeline.common.derived import (apparent_temperature, compass, condition, solar_elevation,
                             sun_times, uv_index, uv_level)
 
 # ---------------------------------------------------------------- icons (inline SVG)

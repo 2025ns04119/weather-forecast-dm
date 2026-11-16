@@ -1,3 +1,4 @@
+"""One-time setup: creates the Neon database schemas and tables from infra/neon_init.sql and lists them."""
 import os
 from pathlib import Path
 import psycopg2
