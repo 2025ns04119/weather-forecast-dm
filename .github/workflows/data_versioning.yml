@@ -1,0 +1,94 @@
+# Data versioning + EDA (manual): runs in the cloud, commits the results back to the repo
+#   1. restore the previous raw data-lake version (DVC) and run the Prefect flow (+ quality report)
+#   2. export the prepared (silver) and feature (gold) datasets
+#   3. execute the EDA notebook (plots -> reports/figures)
+#   4. version data/raw, data/prepared, data/features with DVC -> DagsHub
+#   5. commit the .dvc pointer files, notebook output and reports to GitHub
+name: Data versioning and EDA
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write              # allow the job to commit the .dvc files and reports
+
+concurrency:                   # never overlap with the hourly pipeline (same database)
+  group: hourly-pipeline
+  cancel-in-progress: false
+
+jobs:
+  version-data:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      NEON_DB_URL: ${{ secrets.NEON_DB_URL }}
+      MLFLOW_TRACKING_URI: ${{ secrets.MLFLOW_TRACKING_URI }}
+      MLFLOW_TRACKING_USERNAME: ${{ secrets.MLFLOW_TRACKING_USERNAME }}
+      MLFLOW_TRACKING_PASSWORD: ${{ secrets.MLFLOW_TRACKING_PASSWORD }}
+      PREFECT_API_URL: ${{ secrets.PREFECT_API_URL }}
+      PREFECT_API_KEY: ${{ secrets.PREFECT_API_KEY }}
+      LAT: "12.97"
+      LON: "77.59"
+      LOCATION: "Bengaluru"
+      PYTHONUNBUFFERED: "1"
+
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: requirements-pipeline.txt
+
+      - name: Install dependencies (+ DVC and notebook runner)
+        run: |
+          pip install -r requirements-pipeline.txt
+          pip install "dvc>=3.50" nbconvert ipykernel
+
+      - name: Connect DVC to DagsHub storage
+        run: |
+          dvc remote modify origin --local auth basic
+          dvc remote modify origin --local user "$MLFLOW_TRACKING_USERNAME"
+          dvc remote modify origin --local password "$MLFLOW_TRACKING_PASSWORD"
+
+      - name: Restore the previous raw data-lake version (if any)
+        run: |
+          if [ -f data/raw.dvc ]; then dvc pull data/raw.dvc; fi
+
+      - name: Run the Prefect flow with the data quality report
+        run: python -m orchestration.flow --report
+
+      - name: Export prepared and feature datasets
+        run: python -m features.export_datasets
+
+      - name: Execute the EDA notebook
+        run: |
+          jupyter nbconvert --to notebook --execute notebooks/eda.ipynb \
+            --ExecutePreprocessor.timeout=900 --output eda_executed.ipynb --output-dir reports
+
+      - name: Version the data with DVC and push to DagsHub
+        run: |
+          git rm -r --cached --quiet --ignore-unmatch data/raw
+          dvc add data/raw data/prepared data/features
+          dvc push
+
+      - name: Commit the data versions and reports
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add data/raw.dvc data/prepared.dvc data/features.dvc data/.gitignore reports/
+          git commit -m "Data version $(date -u +'%Y-%m-%d %H:%M') UTC (DVC) + EDA and reports" || echo "nothing to commit"
+          git push
+
+      - name: Keep logs and reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: data-version-${{ github.run_number }}
+          path: |
+            logs/
+            reports/
+          if-no-files-found: ignore
