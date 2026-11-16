@@ -134,6 +134,13 @@ def quality_profile() -> dict:
     return info
 
 
+@st.cache_data(ttl=3600, show_spinner="Running exploratory data analysis…")
+def eda_results() -> dict:
+    """EDA computed with SQL aggregates (same analyses as reports/eda_summary.md)."""
+    from pipeline.data_preparation.eda_metrics import collect
+    return collect(engine())
+
+
 @st.cache_data(ttl=3600, show_spinner="Loading evaluation results from MLflow…")
 def evaluation_results():
     """Test-set metrics of the latest training, from MLflow (same as reports/model_performance.pdf)."""
@@ -335,8 +342,8 @@ def insights_page():
                         pill(s, "pipeline " + {"good": "healthy", "warning": "delayed", "critical": "stale"}[s])),
                     unsafe_allow_html=True)
 
-    t1, t2, tq, te, t3 = st.tabs(["🎯  Forecast & accuracy", "🗄️  Data pipeline", "✅  Data quality",
-                                  "📈  Model evaluation", "ℹ️  About"])
+    t1, t2, tq, tx, te, t3 = st.tabs(["🎯  Forecast & accuracy", "🗄️  Data pipeline", "✅  Data quality",
+                                      "🔍  Exploratory analysis", "📈  Model evaluation", "ℹ️  About"])
 
     with t1:
         if not fc.empty:
@@ -537,6 +544,145 @@ def insights_page():
             st.caption(f"Profiled {dq['generated_at_utc']} UTC · same checks as reports/data_quality_report.pdf "
                        "(pipeline/profiling_validation/quality_metrics.py).")
 
+    with tx:
+        try:
+            ed = eda_results()
+        except Exception as e:
+            ed = None
+            st.info(f"EDA results are not available right now ({type(e).__name__}).")
+        if ed:
+            ov = ed["overview"]
+            rain, daily, ft = ed["rain"], ed["daily"], ed["feature_target"]
+            peak = int(daily.loc[daily["temperature"].idxmax(), "local_hour"]) if not daily.empty else None
+            cards = [("Hourly records", f"{ov['rows']:,}", "Silver layer"),
+                     ("Locations", f"{ov['locations']}", "32-city catalogue + searched"),
+                     ("Period", ov["first_ts"], f"to {ov['last_ts']}"),
+                     ("Rainy hours", f"{rain['rainy_pct'].mean():.1f}%", "average · ≥ 0.1 mm"),
+                     ("Bengaluru warmest", f"{peak}:00" if peak is not None else "—", "local time (IST)"),
+                     ("Top feature", ft.abs().idxmax() if not ft.empty else "—",
+                      f"corr {ft[ft.abs().idxmax()]:.2f} with temp 24 h later" if not ft.empty else "")]
+            for col, (lab, val, sub) in zip(st.columns(6), cards):
+                col.markdown(kpi(lab, val, sub), unsafe_allow_html=True)
+
+            # 1. distributions
+            st.markdown("#### 1 · Distributions")
+            var = st.segmented_control("Variable", list(ed["histograms"]), default="temperature_2m", key="eda_var")
+            var = var or "temperature_2m"
+            h = ed["histograms"][var]
+            d_left, d_right = st.columns([3, 2])
+            with d_left:
+                title = f"{var} – hourly values" + (" (> 0 mm only, log scale)" if var == "precipitation" else "")
+                st.markdown(f'<div class="chart-title">{title}</div>', unsafe_allow_html=True)
+                fh = go.Figure(go.Bar(x=h["mid"], y=h["n"], marker=dict(color=C_FORECAST),
+                                      hovertemplate="≈ %{x:.1f}: %{y:,} hours<extra></extra>"))
+                base_layout(fh, 330, "Hours")
+                fh.update_layout(bargap=0.05, hovermode="closest", showlegend=False)
+                fh.update_xaxes(showspikes=False)
+                if var == "precipitation":
+                    fh.update_yaxes(type="log")
+                st.plotly_chart(fh, use_container_width=True, config=PLOT_CFG)
+            with d_right:
+                st.markdown("**Summary statistics (silver layer)**")
+                st.dataframe(ov["stats"].rename(columns={"variable": "Variable", "mean": "Mean", "std": "Std",
+                                                         "min": "Min", "max": "Max", "missing": "Missing"}),
+                             use_container_width=True, hide_index=True)
+
+            # 2. correlation + feature vs target
+            st.markdown("#### 2 · Relationships")
+            r_left, r_right = st.columns(2)
+            with r_left:
+                corr = ed["correlation"]
+                st.markdown('<div class="chart-title">Correlation between weather variables</div>',
+                            unsafe_allow_html=True)
+                fc_ = go.Figure(go.Heatmap(z=corr.values, x=corr.columns, y=corr.index, zmin=-1, zmax=1,
+                                           colorscale="RdBu", reversescale=True, text=corr.values,
+                                           texttemplate="%{text:.2f}", textfont=dict(size=10),
+                                           hovertemplate="%{y} vs %{x}: %{z:.2f}<extra></extra>"))
+                base_layout(fc_, 430, "")
+                fc_.update_layout(hovermode="closest")
+                fc_.update_xaxes(showspikes=False, showgrid=False, tickangle=-40)
+                fc_.update_yaxes(autorange="reversed", showgrid=False)
+                st.plotly_chart(fc_, use_container_width=True, config=PLOT_CFG)
+            with r_right:
+                st.markdown(f'<div class="chart-title">Gold features vs temperature 24 h later '
+                            f'(Bengaluru, {ed["feature_version"]})</div>', unsafe_allow_html=True)
+                ff = go.Figure(go.Bar(x=ft.values, y=ft.index, orientation="h",
+                                      marker=dict(color=[C_ACTUAL if v < 0 else C_FORECAST for v in ft.values]),
+                                      hovertemplate="%{y}: %{x:.2f}<extra></extra>"))
+                base_layout(ff, 430, "")
+                ff.update_layout(hovermode="closest", showlegend=False)
+                ff.update_xaxes(range=[-1, 1], showspikes=False, title="Correlation")
+                st.plotly_chart(ff, use_container_width=True, config=PLOT_CFG)
+
+            # 3. seasonal and daily patterns
+            st.markdown("#### 3 · Seasonal and daily patterns")
+            p_left, p_right = st.columns(2)
+            with p_left:
+                st.markdown('<div class="chart-title">Mean temperature by month and climate zone</div>',
+                            unsafe_allow_html=True)
+                fm = go.Figure()
+                for zone, g in ed["monthly"].groupby("climate_zone"):
+                    fm.add_trace(go.Scatter(x=g["month"], y=g["temperature"], mode="lines+markers", name=zone,
+                                            hovertemplate=zone + " · month %{x}: %{y:.1f}°C<extra></extra>"))
+                base_layout(fm, 380)
+                fm.update_xaxes(tickmode="array", tickvals=list(range(1, 13)),
+                                ticktext=["J", "F", "M", "A", "M", "J", "J", "A", "S", "O", "N", "D"])
+                st.plotly_chart(fm, use_container_width=True, config=PLOT_CFG)
+            with p_right:
+                st.markdown('<div class="chart-title">Bengaluru – average daily cycle (IST)</div>',
+                            unsafe_allow_html=True)
+                fd = go.Figure()
+                fd.add_trace(go.Scatter(x=daily["local_hour"], y=daily["temperature"], mode="lines+markers",
+                                        name="Temperature (°C)", line=dict(color=C_FORECAST, width=2),
+                                        hovertemplate="%{x}:00 · %{y:.1f}°C<extra></extra>"))
+                fd.add_trace(go.Scatter(x=daily["local_hour"], y=daily["humidity"], mode="lines+markers",
+                                        name="Humidity (%)", yaxis="y2", line=dict(color=C_ACTUAL, width=2),
+                                        hovertemplate="%{x}:00 · %{y:.0f}%<extra></extra>"))
+                base_layout(fd, 380)
+                fd.update_layout(yaxis2=dict(overlaying="y", side="right", title="Humidity (%)", showgrid=False))
+                fd.update_xaxes(title="Local hour", dtick=3)
+                st.plotly_chart(fd, use_container_width=True, config=PLOT_CFG)
+
+            # 4. rain sparsity and completeness
+            st.markdown("#### 4 · Rain sparsity and data completeness")
+            c_left, c_right = st.columns([2, 3])
+            with c_left:
+                st.markdown('<div class="chart-title">% of hours with rain (≥ 0.1 mm)</div>',
+                            unsafe_allow_html=True)
+                fr = go.Figure(go.Bar(x=rain["rainy_pct"], y=rain["location"], orientation="h",
+                                      marker=dict(color=C_FORECAST, cornerradius=3),
+                                      hovertemplate="%{y}: %{x:.1f}% of hours<extra></extra>"))
+                base_layout(fr, max(420, 20 * len(rain)), "")
+                fr.update_layout(hovermode="closest", showlegend=False, bargap=0.25)
+                fr.update_xaxes(showspikes=False, title="% of hours")
+                st.plotly_chart(fr, use_container_width=True, config=PLOT_CFG)
+            with c_right:
+                cm = ed["completeness"]
+                st.markdown('<div class="chart-title">Hourly data completeness by city and month (%)</div>',
+                            unsafe_allow_html=True)
+                fk = go.Figure(go.Heatmap(z=cm.values, x=cm.columns, y=cm.index, zmin=0, zmax=100,
+                                          colorscale="Blues", colorbar=dict(title="%"),
+                                          hovertemplate="%{y} · %{x}: %{z:.1f}%<extra></extra>"))
+                base_layout(fk, max(420, 20 * len(cm)), "")
+                fk.update_layout(hovermode="closest")
+                fk.update_xaxes(showspikes=False, showgrid=False, tickangle=-40)
+                fk.update_yaxes(showgrid=False)
+                st.plotly_chart(fk, use_container_width=True, config=PLOT_CFG)
+
+            with st.expander("Key findings and how they shaped the features"):
+                st.markdown(f"""
+- **Rain is sparse** – only {rain['rainy_pct'].mean():.1f}% of hours are rainy on average, so rain is predicted as a
+  *probability* and judged with Brier score, AUC, precision/recall – not accuracy.
+- **Seasons differ by climate zone and flip in the southern hemisphere** → *month* and *latitude* features.
+- **Strong daily cycle** – Bengaluru peaks around {peak}:00 IST while humidity is lowest → *solar hour* feature.
+- **Temperature is persistent** – recent temperatures (lags, rolling means) correlate most with the value 24 h later
+  → lag and rolling-mean features; the persistence baseline is the benchmark the model must beat.
+- **Humidity, dew point and temperature are correlated** – tree models handle this; linear models use scaling.
+- **Completeness** – gaps (light cells) are filled only up to 3 h; longer gaps are dropped, not invented.
+""")
+            st.caption(f"Computed {ed['generated_at_utc']} UTC with SQL aggregates on the silver and gold layers · "
+                       "same analyses as reports/eda_summary.md (pipeline/data_preparation/eda_metrics.py).")
+
     with te:
         try:
             ev, meta = evaluation_results()
@@ -624,6 +770,7 @@ demand with the same validation rules, features and model.
 - **Medallion architecture:** bronze → silver → gold
 - **Data modelling:** location dimension table
 - **Data quality:** rule checks + Great Expectations, quarantine for bad rows, profiling (Data quality tab)
+- **EDA:** distributions, correlations, seasonality, rain sparsity, completeness (Exploratory analysis tab)
 - **Lineage & metadata:** every run logged; each row traces to its raw payload
 - **Versioning:** features (v1 → v3), DVC training snapshots, MLflow model registry
 - **Evaluation:** test metrics vs baselines tracked in MLflow (Model evaluation tab)

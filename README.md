@@ -58,7 +58,9 @@ weather-forecast-dm/
 | | `pipeline/raw_data_storage/README.md` | Storage layout documentation (lake folders, bronze tables, logs) |
 | **4 Profiling & validation** | `pipeline/profiling_validation/clean_weather.py` | Range/required-field rules, Great Expectations suite, quarantine; writes the silver layer |
 | | `pipeline/profiling_validation/quality_report.py` | Data quality report (PDF + JSON): missing values, duplicates, ranges, completeness, quarantine |
+| | `pipeline/profiling_validation/quality_metrics.py` | Data quality metrics in SQL, shared by the report and the app's *Data quality* tab |
 | **5 Data preparation** | `pipeline/data_preparation/eda.py` | EDA: 7 plots + summary of distributions, correlations, seasonality, sparsity, completeness |
+| | `pipeline/data_preparation/eda_metrics.py` | The same EDA computed with SQL aggregates for the app's *Exploratory analysis* tab |
 | **6 Feature engineering** | `pipeline/feature_engineering/build_features.py` | Builds 18 features (lags, rolling means, solar hour, rain totals …), version v3, gold layer |
 | **7 Feature store** | `pipeline/feature_store/registry.yaml` | Feature metadata: name, source, transformation, versions |
 | | `pipeline/feature_store/store.py` | Registry sync/check and versioned retrieval for training and inference |
@@ -70,6 +72,7 @@ weather-forecast-dm/
 | | `pipeline/model_training/multi_horizon.py` | The combined 7-day multi-target model class and target definitions |
 | **10 Model evaluation** | `pipeline/model_evaluation/metrics.py` | MAE, RMSE, R², Brier, AUC and persistence/climatology baselines |
 | | `pipeline/model_evaluation/performance_report.py` | Model vs baseline report (PDF + CSV) from MLflow |
+| | `pipeline/model_evaluation/results.py` | Reads the latest test metrics from MLflow, for the report and the app's *Model evaluation* tab |
 | **Model deployment** | `pipeline/model_deployment/predict.py` | Hourly 7-day forecast for Bengaluru, saved to `ml.predictions` |
 | | `pipeline/model_deployment/on_demand.py` | Forecast for any searched city, in memory (used by the app) |
 | **11 Orchestration** | `pipeline/orchestration/flow.py` | Prefect flow: CSV → API → validate → [reports] → features → feature store → [train] → predict |
