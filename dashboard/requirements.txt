@@ -1,5 +1,5 @@
 # Packages for the WEB APP only (installed by Streamlit Cloud, which needs this exact name next to app.py).
-# Team members install requirements-full.txt instead, which includes this file.
+# install requirements-full.txt instead, which includes this file.
 cloudpickle==3.1.2
 mlflow-skinny==3.18.0
 numpy==2.4.6

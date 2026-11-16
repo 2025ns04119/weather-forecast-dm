@@ -14,7 +14,6 @@ Usage (from the project root):
 """
 import json
 import textwrap
-from datetime import datetime, timezone
 from pathlib import Path
 
 import matplotlib
@@ -22,78 +21,20 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import pandas as pd
 from matplotlib.backends.backend_pdf import PdfPages
-from sqlalchemy import text
 
 from pipeline.common.db import finish_run, get_engine, start_run
 from pipeline.common.logger import get_logger
-from pipeline.profiling_validation.clean_weather import COLUMNS, RANGES, run_great_expectations
+from pipeline.profiling_validation.clean_weather import COLUMNS, run_great_expectations
+from pipeline.profiling_validation.quality_metrics import profile as sql_profile, q
 
 log = get_logger("validation")
 OUT_DIR = Path("reports")
 BLUE, ORANGE, GREY = "#2a78d6", "#eb6834", "#8a8a8a"
-EXPECTED_SCHEMA = ["location", "ts", *COLUMNS, "raw_id", "ingested_at"]
-
-
-def q(engine, sql: str, **params) -> pd.DataFrame:
-    with engine.connect() as conn:
-        return pd.read_sql(text(sql), conn, params=params)
 
 
 def profile(engine) -> dict:
-    out = {"generated_at_utc": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M")}
-
-    # 1. schema check
-    cols = q(engine, """SELECT column_name FROM information_schema.columns
-                        WHERE table_schema='clean' AND table_name='weather_hourly'""")["column_name"].tolist()
-    out["schema"] = {"missing_columns": [c for c in EXPECTED_SCHEMA if c not in cols],
-                     "unexpected_columns": [c for c in cols if c not in EXPECTED_SCHEMA]}
-
-    # 2. row counts per layer
-    out["row_counts"] = q(engine, """
-        SELECT 'raw.weather_api' AS layer, COUNT(*) AS n FROM raw.weather_api
-        UNION ALL SELECT 'raw.city_catalogue', COUNT(*) FROM raw.city_catalogue
-        UNION ALL SELECT 'clean.weather_hourly', COUNT(*) FROM clean.weather_hourly
-        UNION ALL SELECT 'clean.locations', COUNT(*) FROM clean.locations
-        UNION ALL SELECT 'quarantine.weather_rejects', COUNT(*) FROM quarantine.weather_rejects
-        UNION ALL SELECT 'quarantine.location_rejects', COUNT(*) FROM quarantine.location_rejects
-        UNION ALL SELECT 'features.weather_features', COUNT(*) FROM features.weather_features
-        """).set_index("layer")["n"].astype(int).to_dict()
-    total = out["row_counts"]["clean.weather_hourly"]
-
-    # 3. missing values per column
-    nulls = q(engine, "SELECT " + ", ".join(f"COUNT(*) - COUNT({c}) AS {c}" for c in COLUMNS)
-              + " FROM clean.weather_hourly").iloc[0].astype(int)
-    out["missing_values"] = {c: {"count": int(nulls[c]), "pct": round(100 * nulls[c] / max(total, 1), 3)}
-                             for c in COLUMNS}
-
-    # 4. duplicates (primary key location+ts should make this 0)
-    out["duplicates"] = int(q(engine, """SELECT COUNT(*) AS n FROM (SELECT location, ts FROM clean.weather_hourly
-                                         GROUP BY location, ts HAVING COUNT(*) > 1) d""")["n"].iloc[0])
-
-    # 5. range violations (should be 0 - bad rows are quarantined)
-    rng = q(engine, "SELECT " + ", ".join(
-        f"SUM(CASE WHEN {c} < {lo} OR {c} > {hi} THEN 1 ELSE 0 END) AS {c}" for c, (lo, hi) in RANGES.items())
-        + " FROM clean.weather_hourly").iloc[0].fillna(0).astype(int)
-    out["range_violations"] = {c: int(rng[c]) for c in RANGES}
-
-    # 6. completeness and freshness per location
-    comp = q(engine, """
-        SELECT location, COUNT(*) AS hours, MIN(ts) AS first_ts, MAX(ts) AS last_ts,
-               (EXTRACT(EPOCH FROM MAX(ts) - MIN(ts)) / 3600 + 1)::bigint AS expected
-        FROM clean.weather_hourly GROUP BY location ORDER BY location""")
-    comp["missing_hours"] = comp["expected"] - comp["hours"]
-    comp["completeness_pct"] = (100 * comp["hours"] / comp["expected"]).round(2)
-    comp["age_hours"] = ((pd.Timestamp.now(tz="UTC") - pd.to_datetime(comp["last_ts"], utc=True))
-                         .dt.total_seconds() / 3600).round(1)
-    out["completeness"] = comp[["location", "hours", "expected", "missing_hours",
-                                "completeness_pct", "age_hours"]].to_dict("records")
-
-    # 7. quarantine reasons
-    out["quarantine_weather"] = q(engine, """SELECT reason, COUNT(*) AS n FROM quarantine.weather_rejects
-                                             GROUP BY reason ORDER BY n DESC""").to_dict("records")
-    out["quarantine_locations"] = q(engine, """SELECT reason, COUNT(*) AS n FROM quarantine.location_rejects
-                                               GROUP BY reason ORDER BY n DESC""").to_dict("records")
-
+    """Data quality metrics (quality_metrics.profile) + Great Expectations on the last 7 days."""
+    out = sql_profile(engine)
     # 8. Great Expectations on the last 7 days
     recent = q(engine, f"""SELECT location, ts, {', '.join(COLUMNS)} FROM clean.weather_hourly
                            WHERE ts >= now() - interval '7 days'""")

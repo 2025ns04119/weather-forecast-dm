@@ -1,5 +1,5 @@
 """
-Values the app shows that are CALCULATED by this project (no external service):
+Values the app shows that are CALCULATED by this project:
 
     solar_elevation()      sun angle for any place/time   (NOAA solar-position equations)
     sun_times()            sunrise / sunset               (NOAA sunrise equation)

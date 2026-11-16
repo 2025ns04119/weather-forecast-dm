@@ -125,6 +125,22 @@ OBS_COLS = ("ts, temperature_2m, relative_humidity_2m, dew_point_2m, wind_speed_
             "wind_direction_10m, cloud_cover, precipitation")
 
 
+@st.cache_data(ttl=1800, show_spinner="Profiling data quality…")
+def quality_profile() -> dict:
+    """Data quality metrics from the database (same checks as reports/data_quality_report.pdf)."""
+    from pipeline.profiling_validation.quality_metrics import latest_gx_result, profile
+    info = profile(engine())
+    info["gx"] = latest_gx_result(engine())
+    return info
+
+
+@st.cache_data(ttl=3600, show_spinner="Loading evaluation results from MLflow…")
+def evaluation_results():
+    """Test-set metrics of the latest training, from MLflow (same as reports/model_performance.pdf)."""
+    from pipeline.model_evaluation.results import collect
+    return collect()
+
+
 def stored_forecast(loc: str) -> pd.DataFrame:
     return query("""
         SELECT target_ts, predicted_temp, predicted_humidity AS humidity, predicted_wind AS wind,
@@ -319,7 +335,8 @@ def insights_page():
                         pill(s, "pipeline " + {"good": "healthy", "warning": "delayed", "critical": "stale"}[s])),
                     unsafe_allow_html=True)
 
-    t1, t2, t3 = st.tabs(["🎯  Forecast & accuracy", "🗄️  Data pipeline", "ℹ️  About"])
+    t1, t2, tq, te, t3 = st.tabs(["🎯  Forecast & accuracy", "🗄️  Data pipeline", "✅  Data quality",
+                                  "📈  Model evaluation", "ℹ️  About"])
 
     with t1:
         if not fc.empty:
@@ -455,6 +472,135 @@ def insights_page():
                              f"{'Drift detected' if d['drift_detected'] else 'No drift'} · "
                              f"{(d['drift_share'] or 0):.0%} of features drifted"), unsafe_allow_html=True)
 
+    with tq:
+        try:
+            dq = quality_profile()
+        except Exception as e:
+            dq = None
+            st.info(f"Data quality metrics are not available right now ({type(e).__name__}).")
+        if dq:
+            comp = pd.DataFrame(dq["completeness"])
+            overall = 100 * comp["hours"].sum() / max(comp["expected"].sum(), 1)
+            missing = sum(v["count"] for v in dq["missing_values"].values())
+            ranges = sum(dq["range_violations"].values())
+            quar_w = sum(r["n"] for r in dq["quarantine_weather"])
+            quar_l = sum(r["n"] for r in dq["quarantine_locations"])
+            cards = [("Great Expectations", dq["gx"] or "—", "Latest validation run"),
+                     ("Completeness", f"{overall:.2f}%", f"{int(comp['missing_hours'].sum()):,} missing hours"),
+                     ("Missing values", f"{missing:,}", "Silver layer, 8 variables"),
+                     ("Duplicates", f"{dq['duplicates']:,}", "Same location + hour"),
+                     ("Range violations", f"{ranges:,}", "Values outside physical limits"),
+                     ("Quarantined rows", f"{quar_w + quar_l:,}", f"weather {quar_w:,} · city CSV {quar_l:,}")]
+            for col, (lab, val, sub) in zip(st.columns(6), cards):
+                col.markdown(kpi(lab, val, sub), unsafe_allow_html=True)
+            sch = dq["schema"]
+            ok = not sch["missing_columns"] and not sch["unexpected_columns"]
+            st.markdown(pill("good" if ok else "critical", "schema matches the expected columns" if ok else
+                             f"schema mismatch: missing {sch['missing_columns']}, unexpected {sch['unexpected_columns']}"),
+                        unsafe_allow_html=True)
+            st.write("")
+            q_left, q_right = st.columns([3, 2])
+            with q_left:
+                st.markdown('<div class="chart-title">Completeness per location (% of expected hourly rows)</div>',
+                            unsafe_allow_html=True)
+                c = comp.sort_values("completeness_pct")
+                fq = go.Figure(go.Bar(x=c["completeness_pct"], y=c["location"], orientation="h",
+                                      marker=dict(color=C_FORECAST, cornerradius=3),
+                                      customdata=c[["hours", "missing_hours"]],
+                                      hovertemplate="%{y}: %{x:.2f}%<br>%{customdata[0]:,} hours, "
+                                                    "%{customdata[1]:,} missing<extra></extra>"))
+                base_layout(fq, max(420, 22 * len(c)), "")
+                fq.update_layout(hovermode="closest", showlegend=False, bargap=0.25)
+                fq.update_xaxes(range=[max(0, float(c["completeness_pct"].min()) - 1), 100.2], showspikes=False,
+                                title="Completeness (%)")
+                st.plotly_chart(fq, use_container_width=True, config=PLOT_CFG)
+            with q_right:
+                st.markdown("**Missing values per column (silver)**")
+                st.dataframe(pd.DataFrame([{"Column": k, "Missing": v["count"], "%": v["pct"]}
+                                           for k, v in dq["missing_values"].items()]),
+                             use_container_width=True, hide_index=True)
+                st.markdown("**Rows per layer**")
+                st.dataframe(pd.DataFrame([{"Table": k, "Rows": v} for k, v in dq["row_counts"].items()]),
+                             use_container_width=True, hide_index=True)
+                st.markdown("**Quarantine reasons**")
+                qr = pd.DataFrame(dq["quarantine_weather"] + dq["quarantine_locations"])
+                if qr.empty:
+                    st.markdown(pill("good", "no rows quarantined"), unsafe_allow_html=True)
+                else:
+                    st.dataframe(qr.rename(columns={"reason": "Reason", "n": "Rows"}),
+                                 use_container_width=True, hide_index=True)
+                stale = comp.sort_values("age_hours", ascending=False).head(5)
+                st.markdown("**Freshness – oldest data first** (only the monitored city is refreshed hourly)")
+                st.dataframe(stale[["location", "age_hours"]].rename(columns={"location": "Location",
+                                                                              "age_hours": "Hours since last row"}),
+                             use_container_width=True, hide_index=True)
+            st.caption(f"Profiled {dq['generated_at_utc']} UTC · same checks as reports/data_quality_report.pdf "
+                       "(pipeline/profiling_validation/quality_metrics.py).")
+
+    with te:
+        try:
+            ev, meta = evaluation_results()
+        except Exception as e:
+            ev, meta = pd.DataFrame(), {}
+            st.info(f"Evaluation results are not available right now ({type(e).__name__}).")
+        if not ev.empty:
+            cards = [("Champion model", "weather-7day", f"run {str(meta.get('run_id', ''))[:8]}"),
+                     ("Test period from", str(meta.get("test_from", "—"))[:10], "time-based split + embargo"),
+                     ("Training rows", f"{int(float(meta.get('rows_total') or 0)):,}",
+                      f"{meta.get('locations', '—')} locations · features {meta.get('feature_version', '—')}"),
+                     ("Model size", f"{meta.get('model_size_mb', '—')} MB", "35 models (5 targets × 7 days)")]
+            for col, (lab, val, sub) in zip(st.columns(4), cards):
+                col.markdown(kpi(lab, val, sub), unsafe_allow_html=True)
+            names = {"Temperature": "temp", "Humidity": "humidity", "Wind": "wind", "Cloud cover": "cloud"}
+            units = {"temp": "°C", "humidity": "%", "wind": "km/h", "cloud": "%"}
+            pick = st.segmented_control("Target", list(names), default="Temperature", key="eval_target")
+            t = names.get(pick or "Temperature", "temp")
+            sub = ev[ev["target"] == t].sort_values("day")
+            e_left, e_right = st.columns([3, 2])
+            with e_left:
+                st.markdown(f'<div class="chart-title">{pick or "Temperature"} – MAE on the test period: model vs '
+                            f'persistence baseline (lower is better)</div>', unsafe_allow_html=True)
+                fe = go.Figure()
+                fe.add_trace(go.Scatter(x=[f"Day {d}" for d in sub["day"]], y=sub.get("model_mae"),
+                                        mode="lines+markers", name="Model", line=dict(color=C_FORECAST, width=3)))
+                fe.add_trace(go.Scatter(x=[f"Day {d}" for d in sub["day"]], y=sub.get("baseline_mae"),
+                                        mode="lines+markers", name="Persistence baseline",
+                                        line=dict(color=C_ACTUAL, width=2, dash="dot")))
+                base_layout(fe, 360, f"MAE ({units[t]})")
+                fe.update_yaxes(rangemode="tozero")
+                st.plotly_chart(fe, use_container_width=True, config=PLOT_CFG)
+            with e_right:
+                tab = pd.DataFrame({"Day": sub["day"],
+                                    "MAE": sub.get("model_mae"), "RMSE": sub.get("model_rmse"),
+                                    "R²": sub.get("model_r2"), "Baseline MAE": sub.get("baseline_mae")})
+                tab["Improvement vs baseline"] = (1 - tab["MAE"] / tab["Baseline MAE"]).map(
+                    lambda x: f"{x:.0%}" if pd.notna(x) else "—")
+                st.markdown(f"**{pick or 'Temperature'} – test metrics by forecast day ({units[t]})**")
+                st.dataframe(tab.round(3), use_container_width=True, hide_index=True)
+            rain = ev[ev["target"] == "rain"].sort_values("day")
+            if not rain.empty:
+                st.markdown("#### Rain (yes/no ≥ 0.1 mm) – classification metrics")
+                cols = {"day": "Day", "model_brier": "Brier (model)", "baseline_brier": "Brier (climatology)",
+                        "model_auc": "AUC", "model_precision": "Precision", "model_recall": "Recall",
+                        "model_f1": "F1"}
+                st.dataframe(rain[[c for c in cols if c in rain.columns]].rename(columns=cols).round(3),
+                             use_container_width=True, hide_index=True)
+                if "model_precision" not in rain.columns:
+                    st.caption("Precision / recall / F1 appear after the next training run.")
+            with st.expander("What do these metrics mean?"):
+                st.markdown("""
+- **MAE** – average size of the error (same unit as the variable). **RMSE** – like MAE but punishes large errors more.
+  **R²** – share of the variation explained (1 = perfect).
+- **Persistence baseline** – "the weather in *d* days equals the weather now". A useful model must beat it.
+- **Brier score** – error of the rain probability (0 = perfect); compared with **climatology** (the usual rain rate).
+- **AUC** – how well rain probabilities rank rainy hours above dry ones (0.5 = random, 1 = perfect).
+- **Precision / Recall / F1** – rain predicted when probability ≥ 50%: precision = how many predicted rainy hours
+  were rainy; recall = how many rainy hours were caught; F1 = their balance. These replace the brief's
+  Precision@K / Recall@K, which are ranking metrics for recommendation systems.
+""")
+            st.caption("Test-set results of the latest training run, read from MLflow on DagsHub · same numbers as "
+                       "reports/model_performance.pdf (pipeline/model_evaluation/results.py).")
+
     with t3:
         a1, a2 = st.columns(2)
         a1.markdown(f"""
@@ -477,10 +623,11 @@ demand with the same validation rules, features and model.
 #### Data management concepts
 - **Medallion architecture:** bronze → silver → gold
 - **Data modelling:** location dimension table
-- **Data quality:** rule checks + Great Expectations, quarantine for bad rows
+- **Data quality:** rule checks + Great Expectations, quarantine for bad rows, profiling (Data quality tab)
 - **Lineage & metadata:** every run logged; each row traces to its raw payload
 - **Versioning:** features (v1 → v3), DVC training snapshots, MLflow model registry
-- **Automation:** GitHub Actions runs the pipeline hourly
+- **Evaluation:** test metrics vs baselines tracked in MLflow (Model evaluation tab)
+- **Automation:** Prefect flow, run hourly by GitHub Actions
 
 #### Tools (all free & open source)
 Python · PostgreSQL (Neon) · Great Expectations · DVC · MLflow (DagsHub) · scikit-learn · XGBoost ·
