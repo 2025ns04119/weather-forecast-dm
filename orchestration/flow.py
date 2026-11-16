@@ -72,7 +72,7 @@ def feature_store():
     run_module("feature_store.store", "--sync", "--check")
 
 
-@task(name="6 train and register model")
+@task(name="6 train and register model", retries=1, retry_delay_seconds=300)
 def train():
     run_module("training.train")
 
