@@ -1,5 +1,5 @@
 # Hourly data + forecast pipeline (runs in the cloud on GitHub Actions)
-# ingest (Open-Meteo) -> validate/clean -> features -> 7-day forecast  ==> Neon
+# ingest (city CSV + Open-Meteo API) -> validate/clean -> features -> 7-day forecast  ==> Neon
 name: Hourly weather pipeline
 
 on:
@@ -39,6 +39,9 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements-pipeline.txt
 
+      - name: 0. Ingest city catalogue CSV (skipped if unchanged)
+        run: python -m ingestion.ingest_csv
+
       - name: 1. Ingest live weather (bronze)
         run: python -m ingestion.fetch_weather --mode live
 
@@ -50,3 +53,14 @@ jobs:
 
       - name: 4. 7-day forecast
         run: python -m inference.predict
+
+      - name: Keep logs and raw data-lake files from this run
+        if: always()                     # also after a failure, for the audit trail
+        uses: actions/upload-artifact@v4
+        with:
+          name: run-${{ github.run_number }}-logs-and-raw
+          path: |
+            logs/
+            data/raw/
+          retention-days: 30
+          if-no-files-found: ignore

@@ -6,6 +6,7 @@ Endpoints (free, no API key, CC BY 4.0):
     archive    https://archive-api.open-meteo.com/v1/archive   history (ERA5 reanalysis)
     geocoding  https://geocoding-api.open-meteo.com/v1/search  place name -> coordinates
 """
+import logging
 import time
 from datetime import date, timedelta
 
@@ -14,6 +15,8 @@ import requests
 FORECAST_URL = "https://api.open-meteo.com/v1/forecast"
 ARCHIVE_URL = "https://archive-api.open-meteo.com/v1/archive"
 GEOCODING_URL = "https://geocoding-api.open-meteo.com/v1/search"
+
+log = logging.getLogger("ingestion.api")   # writes into logs/ingestion.log when run by the pipeline
 
 HOURLY_VARS = [
     "temperature_2m", "relative_humidity_2m", "dew_point_2m", "pressure_msl",
@@ -33,7 +36,7 @@ def call_api(url: str, params: dict, retries: int = 3, timeout: int = 60) -> dic
             r.raise_for_status()
             return r.json()
         except requests.RequestException as e:
-            print(f"Attempt {attempt} failed: {e}")
+            log.warning("API attempt %d/%d failed: %s", attempt, retries, e)
             if attempt == retries:
                 raise
             time.sleep(5 * attempt)

@@ -1,0 +1,33 @@
+city,country,continent,latitude,longitude,timezone,climate_zone,role
+Bengaluru,India,Asia,12.97,77.59,Asia/Kolkata,Tropical,monitored
+Chennai,India,Asia,13.08,80.27,Asia/Kolkata,Tropical,training
+Mumbai,India,Asia,19.08,72.88,Asia/Kolkata,Tropical,training
+Delhi,India,Asia,28.61,77.21,Asia/Kolkata,Subtropical,training
+Kolkata,India,Asia,22.57,88.36,Asia/Kolkata,Tropical,training
+Hyderabad,India,Asia,17.39,78.49,Asia/Kolkata,Arid,training
+Jaipur,India,Asia,26.91,75.79,Asia/Kolkata,Arid,training
+Guwahati,India,Asia,26.14,91.74,Asia/Kolkata,Subtropical,training
+Kochi,India,Asia,9.93,76.27,Asia/Kolkata,Tropical,training
+Srinagar,India,Asia,34.08,74.80,Asia/Kolkata,Temperate,training
+Shimla,India,Asia,31.10,77.17,Asia/Kolkata,Highland,training
+Singapore,Singapore,Asia,1.35,103.82,Asia/Singapore,Tropical,training
+Tokyo,Japan,Asia,35.68,139.69,Asia/Tokyo,Subtropical,training
+Beijing,China,Asia,39.90,116.40,Asia/Shanghai,Continental,training
+Dubai,United Arab Emirates,Asia,25.20,55.27,Asia/Dubai,Arid,training
+London,United Kingdom,Europe,51.51,-0.13,Europe/London,Temperate,training
+Madrid,Spain,Europe,40.42,-3.70,Europe/Madrid,Mediterranean,training
+Moscow,Russia,Europe,55.76,37.62,Europe/Moscow,Continental,training
+Oslo,Norway,Europe,59.91,10.75,Europe/Oslo,Continental,training
+New York,United States,North America,40.71,-74.01,America/New_York,Continental,training
+Chicago,United States,North America,41.88,-87.63,America/Chicago,Continental,training
+Phoenix,United States,North America,33.45,-112.07,America/Phoenix,Arid,training
+Mexico City,Mexico,North America,19.43,-99.13,America/Mexico_City,Highland,training
+Lima,Peru,South America,-12.05,-77.04,America/Lima,Arid,training
+Sao Paulo,Brazil,South America,-23.55,-46.63,America/Sao_Paulo,Subtropical,training
+Buenos Aires,Argentina,South America,-34.60,-58.38,America/Argentina/Buenos_Aires,Subtropical,training
+Cairo,Egypt,Africa,30.04,31.24,Africa/Cairo,Arid,training
+Lagos,Nigeria,Africa,6.52,3.38,Africa/Lagos,Tropical,training
+Nairobi,Kenya,Africa,-1.29,36.82,Africa/Nairobi,Highland,training
+Johannesburg,South Africa,Africa,-26.20,28.05,Africa/Johannesburg,Highland,training
+Sydney,Australia,Oceania,-33.87,151.21,Australia/Sydney,Subtropical,training
+Auckland,New Zealand,Oceania,-36.85,174.76,Pacific/Auckland,Temperate,training
