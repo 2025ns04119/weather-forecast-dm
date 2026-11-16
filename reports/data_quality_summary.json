@@ -1,0 +1,328 @@
+{
+  "generated_at_utc": "2026-11-16 16:47",
+  "schema": {
+    "missing_columns": [],
+    "unexpected_columns": []
+  },
+  "row_counts": {
+    "clean.locations": 32,
+    "raw.weather_api": 170,
+    "raw.city_catalogue": 32,
+    "quarantine.location_rejects": 0,
+    "quarantine.weather_rejects": 0,
+    "clean.weather_hourly": 290177,
+    "features.weather_features": 596324
+  },
+  "missing_values": {
+    "temperature_2m": {
+      "count": 0,
+      "pct": 0.0
+    },
+    "relative_humidity_2m": {
+      "count": 0,
+      "pct": 0.0
+    },
+    "dew_point_2m": {
+      "count": 0,
+      "pct": 0.0
+    },
+    "pressure_msl": {
+      "count": 0,
+      "pct": 0.0
+    },
+    "cloud_cover": {
+      "count": 0,
+      "pct": 0.0
+    },
+    "wind_speed_10m": {
+      "count": 0,
+      "pct": 0.0
+    },
+    "wind_direction_10m": {
+      "count": 0,
+      "pct": 0.0
+    },
+    "precipitation": {
+      "count": 0,
+      "pct": 0.0
+    }
+  },
+  "duplicates": 0,
+  "range_violations": {
+    "temperature_2m": 0,
+    "relative_humidity_2m": 0,
+    "dew_point_2m": 0,
+    "pressure_msl": 0,
+    "cloud_cover": 0,
+    "wind_speed_10m": 0,
+    "wind_direction_10m": 0,
+    "precipitation": 0
+  },
+  "completeness": [
+    {
+      "location": "Auckland",
+      "hours": 8784,
+      "expected": 8784,
+      "missing_hours": 0,
+      "completeness_pct": 100.0,
+      "age_hours": 305.8
+    },
+    {
+      "location": "Beijing",
+      "hours": 8784,
+      "expected": 8784,
+      "missing_hours": 0,
+      "completeness_pct": 100.0,
+      "age_hours": 305.8
+    },
+    {
+      "location": "Bengaluru",
+      "hours": 17873,
+      "expected": 17873,
+      "missing_hours": 0,
+      "completeness_pct": 100.0,
+      "age_hours": 0.8
+    },
+    {
+      "location": "Buenos Aires",
+      "hours": 8784,
+      "expected": 8784,
+      "missing_hours": 0,
+      "completeness_pct": 100.0,
+      "age_hours": 305.8
+    },
+    {
+      "location": "Cairo",
+      "hours": 8784,
+      "expected": 8784,
+      "missing_hours": 0,
+      "completeness_pct": 100.0,
+      "age_hours": 305.8
+    },
+    {
+      "location": "Chennai",
+      "hours": 8784,
+      "expected": 8784,
+      "missing_hours": 0,
+      "completeness_pct": 100.0,
+      "age_hours": 305.8
+    },
+    {
+      "location": "Chicago",
+      "hours": 8784,
+      "expected": 8784,
+      "missing_hours": 0,
+      "completeness_pct": 100.0,
+      "age_hours": 305.8
+    },
+    {
+      "location": "Delhi",
+      "hours": 8784,
+      "expected": 8784,
+      "missing_hours": 0,
+      "completeness_pct": 100.0,
+      "age_hours": 305.8
+    },
+    {
+      "location": "Dubai",
+      "hours": 8784,
+      "expected": 8784,
+      "missing_hours": 0,
+      "completeness_pct": 100.0,
+      "age_hours": 305.8
+    },
+    {
+      "location": "Guwahati",
+      "hours": 8784,
+      "expected": 8784,
+      "missing_hours": 0,
+      "completeness_pct": 100.0,
+      "age_hours": 305.8
+    },
+    {
+      "location": "Hyderabad",
+      "hours": 8784,
+      "expected": 8784,
+      "missing_hours": 0,
+      "completeness_pct": 100.0,
+      "age_hours": 305.8
+    },
+    {
+      "location": "Jaipur",
+      "hours": 8784,
+      "expected": 8784,
+      "missing_hours": 0,
+      "completeness_pct": 100.0,
+      "age_hours": 305.8
+    },
+    {
+      "location": "Johannesburg",
+      "hours": 8784,
+      "expected": 8784,
+      "missing_hours": 0,
+      "completeness_pct": 100.0,
+      "age_hours": 305.8
+    },
+    {
+      "location": "Kochi",
+      "hours": 8784,
+      "expected": 8784,
+      "missing_hours": 0,
+      "completeness_pct": 100.0,
+      "age_hours": 305.8
+    },
+    {
+      "location": "Kolkata",
+      "hours": 8784,
+      "expected": 8784,
+      "missing_hours": 0,
+      "completeness_pct": 100.0,
+      "age_hours": 305.8
+    },
+    {
+      "location": "Lagos",
+      "hours": 8784,
+      "expected": 8784,
+      "missing_hours": 0,
+      "completeness_pct": 100.0,
+      "age_hours": 305.8
+    },
+    {
+      "location": "Lima",
+      "hours": 8784,
+      "expected": 8784,
+      "missing_hours": 0,
+      "completeness_pct": 100.0,
+      "age_hours": 305.8
+    },
+    {
+      "location": "London",
+      "hours": 8784,
+      "expected": 8784,
+      "missing_hours": 0,
+      "completeness_pct": 100.0,
+      "age_hours": 305.8
+    },
+    {
+      "location": "Madrid",
+      "hours": 8784,
+      "expected": 8784,
+      "missing_hours": 0,
+      "completeness_pct": 100.0,
+      "age_hours": 305.8
+    },
+    {
+      "location": "Mexico City",
+      "hours": 8784,
+      "expected": 8784,
+      "missing_hours": 0,
+      "completeness_pct": 100.0,
+      "age_hours": 305.8
+    },
+    {
+      "location": "Moscow",
+      "hours": 8784,
+      "expected": 8784,
+      "missing_hours": 0,
+      "completeness_pct": 100.0,
+      "age_hours": 305.8
+    },
+    {
+      "location": "Mumbai",
+      "hours": 8784,
+      "expected": 8784,
+      "missing_hours": 0,
+      "completeness_pct": 100.0,
+      "age_hours": 305.8
+    },
+    {
+      "location": "Nairobi",
+      "hours": 8784,
+      "expected": 8784,
+      "missing_hours": 0,
+      "completeness_pct": 100.0,
+      "age_hours": 305.8
+    },
+    {
+      "location": "New York",
+      "hours": 8784,
+      "expected": 8784,
+      "missing_hours": 0,
+      "completeness_pct": 100.0,
+      "age_hours": 305.8
+    },
+    {
+      "location": "Oslo",
+      "hours": 8784,
+      "expected": 8784,
+      "missing_hours": 0,
+      "completeness_pct": 100.0,
+      "age_hours": 305.8
+    },
+    {
+      "location": "Phoenix",
+      "hours": 8784,
+      "expected": 8784,
+      "missing_hours": 0,
+      "completeness_pct": 100.0,
+      "age_hours": 305.8
+    },
+    {
+      "location": "Sao Paulo",
+      "hours": 8784,
+      "expected": 8784,
+      "missing_hours": 0,
+      "completeness_pct": 100.0,
+      "age_hours": 305.8
+    },
+    {
+      "location": "Shimla",
+      "hours": 8784,
+      "expected": 8784,
+      "missing_hours": 0,
+      "completeness_pct": 100.0,
+      "age_hours": 305.8
+    },
+    {
+      "location": "Singapore",
+      "hours": 8784,
+      "expected": 8784,
+      "missing_hours": 0,
+      "completeness_pct": 100.0,
+      "age_hours": 305.8
+    },
+    {
+      "location": "Srinagar",
+      "hours": 8784,
+      "expected": 8784,
+      "missing_hours": 0,
+      "completeness_pct": 100.0,
+      "age_hours": 305.8
+    },
+    {
+      "location": "Sydney",
+      "hours": 8784,
+      "expected": 8784,
+      "missing_hours": 0,
+      "completeness_pct": 100.0,
+      "age_hours": 305.8
+    },
+    {
+      "location": "Tokyo",
+      "hours": 8784,
+      "expected": 8784,
+      "missing_hours": 0,
+      "completeness_pct": 100.0,
+      "age_hours": 305.8
+    }
+  ],
+  "quarantine_weather": [],
+  "quarantine_locations": [],
+  "great_expectations": {
+    "success": true,
+    "evaluated": 13,
+    "passed": 13,
+    "failed": 0,
+    "rows_checked": 168
+  }
+}
